@@ -3815,6 +3815,103 @@ def api_save_ai_config():
         json.dump(existing, f, ensure_ascii=False, indent=4)
     return jsonify({'ok': True, 'msg': _t('webui.ai_config_saved')})
 
+# ─── 顶部公告条：内容源在官网，后台定时拉取缓存；断网/无缓存则隐藏 ───
+_ANNOUNCEMENT_REMOTE_URL = "https://dbcheck.top/announcement.json"
+_ANNOUNCEMENT_REFRESH_INTERVAL = 6 * 3600  # 每 6 小时检查一次官网
+_ANNOUNCEMENT_FETCH_TIMEOUT = 8            # 单次拉取超时（秒）
+_announcement_refresher_started = False
+_announcement_refresher_lock = threading.Lock()
+
+def _announcement_valid(cfg):
+    """校验公告配置：dict 且含至少一条有效 items（有 text 的 dict）。"""
+    if not isinstance(cfg, dict):
+        return False
+    items = [it for it in (cfg.get('items') or [])
+             if isinstance(it, dict) and it.get('text')]
+    return bool(items)
+
+def _refresh_announcement_cache():
+    """从官网拉取公告配置，成功（HTTP 200 + 合法 JSON）才原子覆盖本地缓存。
+
+    任何失败（断网/超时/非法内容）都保留旧缓存、绝不写坏文件：
+    无缓存时公告条隐藏，有缓存时沿用上次成功结果。
+    """
+    from modules.core.paths import ANNOUNCEMENT_CACHE_JSON
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            _ANNOUNCEMENT_REMOTE_URL,
+            headers={'User-Agent': 'DBCheck-Announcement/1.0'})
+        with urllib.request.urlopen(req, timeout=_ANNOUNCEMENT_FETCH_TIMEOUT) as resp:
+            raw = resp.read()
+        cfg = json.loads(raw.decode('utf-8'))
+        if not _announcement_valid(cfg):
+            print(f"[announcement] 官网公告内容非法，跳过覆盖: {_ANNOUNCEMENT_REMOTE_URL}")
+            return
+        clean = {'enabled': bool(cfg.get('enabled', True)),
+                 'items': [it for it in cfg.get('items')
+                           if isinstance(it, dict) and it.get('text')]}
+        tmp = ANNOUNCEMENT_CACHE_JSON.with_suffix('.json.tmp')
+        tmp.parent.mkdir(parents=True, exist_ok=True)
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(clean, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, ANNOUNCEMENT_CACHE_JSON)
+        print(f"[announcement] 已更新官网公告缓存: {ANNOUNCEMENT_CACHE_JSON}")
+    except Exception as e:
+        print(f"[announcement] 拉取官网公告失败（保留本地缓存）: {e}")
+
+def _announcement_refresher_loop():
+    while True:
+        _refresh_announcement_cache()
+        time.sleep(_ANNOUNCEMENT_REFRESH_INTERVAL)
+
+def _ensure_announcement_refresher():
+    """懒启动后台拉取线程（仅启动一次，daemon 不阻断退出）。"""
+    global _announcement_refresher_started
+    if _announcement_refresher_started:
+        return
+    with _announcement_refresher_lock:
+        if _announcement_refresher_started:
+            return
+        _announcement_refresher_started = True
+        t = threading.Thread(target=_announcement_refresher_loop,
+                             name='announcement-refresher', daemon=True)
+        t.start()
+
+def _load_announcement_file(path):
+    """读取单个公告配置文件；enabled:false 返回 'disabled'，有效返回配置 dict，其余 None。"""
+    try:
+        if not path.exists():
+            return None
+        with open(path, 'r', encoding='utf-8') as f:
+            cfg = json.load(f)
+        if not cfg.get('enabled', True):
+            return 'disabled'
+        return cfg if _announcement_valid(cfg) else None
+    except Exception as e:
+        print(f"[announcement] 读取公告配置失败（{path}，降级）: {e}")
+        return None
+
+@app.route('/api/announcement', methods=['GET'])
+def api_announcement():
+    """顶部公告条配置（公开只读，fail-open）。
+
+    解析顺序：data/announcement.json（用户手动覆盖，不进 git，enabled:false
+    可永久关闭）> data/announcement_cache.json（官网定时拉取的本地缓存）。
+    两者都无有效内容（含首次运行且断网）一律返回空 items，前端不渲染公告条。
+    """
+    from modules.core.paths import ANNOUNCEMENT_JSON, ANNOUNCEMENT_CACHE_JSON
+    _ensure_announcement_refresher()
+    for path in (ANNOUNCEMENT_JSON, ANNOUNCEMENT_CACHE_JSON):
+        cfg = _load_announcement_file(path)
+        if cfg == 'disabled':
+            return jsonify({'enabled': False, 'items': []})
+        if isinstance(cfg, dict):
+            items = [it for it in (cfg.get('items') or [])
+                     if isinstance(it, dict) and it.get('text')]
+            return jsonify({'enabled': True, 'items': items})
+    return jsonify({'enabled': False, 'items': []})
+
 @app.route('/api/config', methods=['GET'])
 def api_get_config():
     cfg_path = os.path.join(BASE_DIR, 'dbc_config.json')

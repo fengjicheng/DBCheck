@@ -90,6 +90,12 @@ BUILTIN_REGISTRY_JSON = CONFIG_DIR / "builtin_registry.json"
 BUILTIN_TYPES_JSON = CONFIG_DIR / "builtin_types.json"
 QUOTES_JSON = CONFIG_DIR / "dbcheck-quotes.json"
 VERSION_JSON = CONFIG_DIR / "version.json"
+# 顶部公告条配置：内容源在官网（https://dbcheck.top/announcement.json），
+# 后台线程定时拉取，成功才写入本地缓存 ANNOUNCEMENT_CACHE_JSON（data/，不进 git）；
+# 断网/无缓存时公告条隐藏。ANNOUNCEMENT_JSON（data/，不进 git）为用户手动覆盖，
+# 优先级高于缓存，enabled:false 可永久关闭公告条。
+ANNOUNCEMENT_JSON = DATA_DIR / "announcement.json"
+ANNOUNCEMENT_CACHE_JSON = DATA_DIR / "announcement_cache.json"
 BATCH_TEMPLATE_DIR = CONFIG_DIR / "batch_templates"
 
 

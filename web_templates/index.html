@@ -520,6 +520,36 @@ async function executeFixSql(taskId, sql) {
   font-size: 12px; color: var(--text-muted);
   margin-left: auto;
 }
+/* ─── 顶部公告条（低调细条·可关闭·多条轮播；内容来自官网，断网即隐藏）─── */
+.announce-bar {
+  min-height: 28px;
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 3px 40px;
+  font-size: 12px;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  position: relative;
+}
+.announce-bar .announce-icon { font-size: 12px; opacity: .9; }
+.announce-bar .announce-text {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 72vw; opacity: .92;
+  transition: opacity .35s ease;
+}
+.announce-bar .announce-text.announce-fading { opacity: 0; }
+.announce-bar a.announce-link {
+  color: var(--accent); font-weight: 600; text-decoration: none;
+  white-space: nowrap;
+}
+.announce-bar a.announce-link:hover { text-decoration: underline; }
+.announce-bar .announce-close {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  background: transparent; border: none; color: var(--text-muted);
+  font-size: 12px; line-height: 1; cursor: pointer; padding: 4px 6px;
+  border-radius: 6px; opacity: .7;
+}
+.announce-bar .announce-close:hover { background: var(--border); color: var(--text); opacity: 1; }
 .dropdown-item:hover { background: var(--surface2); }
 
 .content {
@@ -18737,9 +18767,90 @@ function toggleTheme() {
   setTheme(getTheme() === 'dark' ? 'light' : 'dark');
 }
 
+// ─── 顶部公告条：读 /api/announcement（官网远端源，后端定时缓存）；
+// ─── 无内容不渲染（60s 后重试一次，覆盖后端首拉未完成的窗口）；多条轮播；可关闭 ───
+var _announceTimer = null;
+var _announceRetryDone = false;
+function _announceHash(s) {
+  var h = 0;
+  for (var i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0; }
+  return String(h);
+}
+async function renderAnnouncement() {
+  var el = document.getElementById('announce-bar');
+  if (el) el.remove();
+  if (_announceTimer) { clearInterval(_announceTimer); _announceTimer = null; }
+  var data;
+  try {
+    var r = await fetch('/api/announcement');
+    data = await r.json();
+  } catch (e) { data = null; }
+  var items = (data && data.enabled && data.items) || [];
+  if (!items.length) {
+    // 后端可能还在等首次官网拉取：仅补一次 60s 后重试，之后不再打扰
+    if (!_announceRetryDone) {
+      _announceRetryDone = true;
+      setTimeout(renderAnnouncement, 60000);
+    }
+    return;
+  }
+  var sig = items.map(function (it) { return it.text || ''; }).join('|');
+  if (localStorage.getItem('dbc_ann_dismissed') === _announceHash(sig)) return;
+
+  var main = document.querySelector('.main');
+  if (!main) return;
+  var bar = document.createElement('div');
+  bar.className = 'announce-bar';
+  bar.id = 'announce-bar';
+  var first = items[0];
+  bar.innerHTML =
+    '<span class="announce-icon">' + (first.icon || '📣') + '</span>' +
+    '<span class="announce-text" id="announce-text"></span>' +
+    '<button class="announce-close" title="关闭公告" onclick="dismissAnnouncement()">✕</button>';
+  main.insertBefore(bar, main.firstChild);
+
+  function showItem(idx) {
+    var t = document.getElementById('announce-text');
+    if (!t) return;
+    var it = items[idx % items.length];
+    var html = escapeHtml(it.text || '');
+    if (it.link) {
+      html += ' <a class="announce-link" href="' + escapeHtml(it.link) + '"' +
+        (it.link_new_tab === false ? '' : ' target="_blank" rel="noopener noreferrer"') +
+        '>' + escapeHtml(it.link_text || '了解详情') + ' →</a>';
+    }
+    // 淡出 → 换内容 → 淡入
+    t.classList.add('announce-fading');
+    setTimeout(function () {
+      t.innerHTML = html;
+      t.classList.remove('announce-fading');
+    }, 350);
+  }
+  showItem(0);
+  if (items.length > 1) {
+    var idx = 1;
+    _announceTimer = setInterval(function () { showItem(idx++); }, 6000);
+    bar.addEventListener('mouseenter', function () { if (_announceTimer) { clearInterval(_announceTimer); _announceTimer = null; } });
+    bar.addEventListener('mouseleave', function () {
+      if (!_announceTimer) _announceTimer = setInterval(function () { showItem(idx++); }, 6000);
+    });
+  }
+}
+function dismissAnnouncement() {
+  var t = document.getElementById('announce-text');
+  if (t) {
+    // 用整条内容签名记关闭，公告内容更新后自动重新弹出
+    try { localStorage.setItem('dbc_ann_dismissed', _announceHash(t.textContent || '')); } catch (e) {}
+  }
+  var el = document.getElementById('announce-bar');
+  if (el) el.remove();
+  if (_announceTimer) { clearInterval(_announceTimer); _announceTimer = null; }
+}
+
 async function initApp() {
   await initI18N();
   initTheme();
+  renderAnnouncement();
   // 只绑定一次 RAG 删除按钮事件
   var ragBody = document.getElementById('rag-doc-tbody');
   if (ragBody) {

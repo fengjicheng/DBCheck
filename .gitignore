@@ -54,6 +54,10 @@ awr_uploads/
 data/*.db
 data/agreement_violation.json
 data/autobackup/
+# 顶部公告条运行时文件：announcement.json=用户手动覆盖；announcement_cache.json=官网拉取缓存
+data/announcement.json
+data/announcement_cache.json
+data/announcement_cache.json.tmp
 drivers_bak/*
 commit_msg.txt
 docker_images/*
