@@ -6145,7 +6145,7 @@ function formatBytes(bytes) {
       }
 
       function showAddDatasourceModal(existingDs) {
-        if (!existingDs) { _editDsPassword = ''; _editDsPort = 0; _editSshPassword = ''; }
+        if (!existingDs) { _editDsPassword = ''; _editDsPort = 0; _editSshPassword = ''; _editingDatasourceId = ''; }
         document.getElementById('datasource-modal-backdrop')?.remove();
         const isEdit = !!existingDs;
         const modalTitle = isEdit ? i18n('webui.pro_datasource_edit_title') : i18n('webui.pro_datasource_add_title');
@@ -6239,6 +6239,7 @@ function formatBytes(bytes) {
       }
 
       let _currentDbType = '';
+      let _editingDatasourceId = '';  // 当前编辑的数据源 id（saveDatasource 据此区分 PUT 更新 / POST 新增）
       let _editDsPassword = '';
       let _editDsPort = 0;
       let _editSshPassword = '';
@@ -6486,7 +6487,7 @@ function formatBytes(bytes) {
 
       async function saveDatasource() {
         const msgEl = document.getElementById('ds-save-msg');
-        const editId = document.getElementById('ds-edit-id')?.value;
+        const editId = _editingDatasourceId || document.getElementById('ds-edit-id')?.value || '';
         const payload = {
           db_type: document.getElementById('ds-db-type').value,
           name: document.getElementById('ds-label').value.trim(),
@@ -6504,7 +6505,7 @@ function formatBytes(bytes) {
         payload.ssh_password = sshOn ? (document.getElementById('ds-ssh-password').value || undefined) : '';
         payload.ssh_key_file = sshOn ? document.getElementById('ds-ssh-key').value.trim() : '';
         payload.ssh_key_password = sshOn ? document.getElementById('ds-ssh-key-password').value.trim() : '';
-        if (payload.db_type === 'pg' || payload.db_type === 'ivorysql' || payload.db_type === 'kingbase' || payload.db_type === 'mysql' || payload.db_type === 'mariadb' || payload.db_type === 'tidb') payload.database = document.getElementById('ds-database').value.trim();
+        if (payload.db_type === 'pg' || payload.db_type === 'ivorysql' || payload.db_type === 'kingbase' || payload.db_type === 'mysql' || payload.db_type === 'mariadb' || payload.db_type === 'tidb' || payload.db_type === 'tdsqlc_mysql') payload.database = document.getElementById('ds-database').value.trim();
         if (payload.db_type === 'oracle' || payload.db_type === 'oracle_jdbc') {
           payload.service_name = document.getElementById('ds-service-name').value.trim();
           payload.sysdba = document.getElementById('ds-sysdba').checked;
@@ -6599,6 +6600,7 @@ function formatBytes(bytes) {
             _editDsPassword = ds.password || '';
             _editDsPort = ds.port;
             _editSshPassword = ds.ssh_password || '';
+            _editingDatasourceId = id;  // 编辑态：saveDatasource 据此走 PUT 更新
             // 先获取原始密码用于编辑
             showAddDatasourceModal(ds);
             // 填充表单
@@ -6614,21 +6616,21 @@ function formatBytes(bytes) {
               document.getElementById('ds-password').placeholder = '（不修改请留空）';
               document.getElementById('ds-password').value = '';
               document.getElementById('ds-group').value = ds.group || 'default';
-              if (ds.db_type === 'pg' || ds.db_type === 'ivorysql') {
-                document.getElementById('ds-database').value = ds.database || 'postgres';
-              }
-              if (ds.db_type === 'mysql' || ds.db_type === 'mariadb' || ds.db_type === 'tidb') {
+              // 数据库名回填：按 SHOW_DB_FIELD 通用覆盖（db2/tdsqlc_mysql/插件类型此前漏填）
+              if (window.SHOW_DB_FIELD && window.SHOW_DB_FIELD[ds.db_type]) {
                 document.getElementById('ds-database').value = ds.database || '';
               }
-              if (ds.db_type === 'kingbase') {
-                document.getElementById('ds-database').value = ds.database || 'kingbase';
+              if ((ds.db_type === 'pg' || ds.db_type === 'ivorysql') && !ds.database) {
+                document.getElementById('ds-database').value = 'postgres';
+              }
+              if (ds.db_type === 'kingbase' && !ds.database) {
+                document.getElementById('ds-database').value = 'kingbase';
               }
               if (ds.db_type === 'gbase') {
-                document.getElementById('ds-database').value = ds.database || 'sysmaster';
+                if (!ds.database) document.getElementById('ds-database').value = 'sysmaster';
                 document.getElementById('ds-gbase-server').value = ds.gbase_server_name || 'gbase01';
               }
               if (ds.db_type === 'oceanbase') {
-                document.getElementById('ds-database').value = ds.database || '';
                 document.getElementById('ds-tenant').value = ds.tenant || '';
               }
               if (ds.db_type === 'oracle' || ds.db_type === 'oracle_jdbc') {
@@ -6678,13 +6680,9 @@ function formatBytes(bytes) {
               if (isJdbcType(ds.db_type)) {
                 setTimeout(function(){ _loadDriverVersions(ds.db_type, ds.driver_version || ''); }, 250);
               }
-              // 添加隐藏字段存储ID
-              const form = document.getElementById('datasource-modal-backdrop').querySelector('div[style*="min-width"]');
-              const idInput = document.createElement('input');
-              idInput.type = 'hidden';
-              idInput.id = 'ds-edit-id';
-              idInput.value = id;
-              form.appendChild(idInput);
+              // 编辑态 id 已存入 _editingDatasourceId（showAddDatasourceModal 新增时清空），
+              // 不再用隐藏 input 挂 DOM——旧实现按 style 特征找挂载点，弹窗面板改版后
+              // 选择器落空导致 appendChild 抛错、editId 丢失、更新被当成新增（多出一条数据）。
             }, 100);
           } else {
             toastError(i18n('webui.ds_get_info_fail'));
