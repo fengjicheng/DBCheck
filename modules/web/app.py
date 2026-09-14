@@ -3817,7 +3817,7 @@ def api_save_ai_config():
 
 # ─── 顶部公告条：内容源在官网，后台定时拉取缓存；断网/无缓存则隐藏 ───
 _ANNOUNCEMENT_REMOTE_URL = "https://dbcheck.top/announcement.json"
-_ANNOUNCEMENT_REFRESH_INTERVAL = 6 * 3600  # 每 6 小时检查一次官网
+_ANNOUNCEMENT_REFRESH_INTERVAL = 30 * 60   # 每 30 分钟检查一次官网（与前端重查频率对齐，最坏约 1 小时内感知官网更新）
 _ANNOUNCEMENT_FETCH_TIMEOUT = 8            # 单次拉取超时（秒）
 _announcement_refresher_started = False
 _announcement_refresher_lock = threading.Lock()
@@ -3831,10 +3831,11 @@ def _announcement_valid(cfg):
     return bool(items)
 
 def _refresh_announcement_cache():
-    """从官网拉取公告配置，成功（HTTP 200 + 合法 JSON）才原子覆盖本地缓存。
+    """从官网拉取公告配置，成功（HTTP 200 + 合法 JSON）且内容有变化才原子覆盖本地缓存。
 
     任何失败（断网/超时/非法内容）都保留旧缓存、绝不写坏文件：
     无缓存时公告条隐藏，有缓存时沿用上次成功结果。
+    内容与现有缓存相同（规范化后）则跳过写盘，30 分钟一次的检查零开销。
     """
     from modules.core.paths import ANNOUNCEMENT_CACHE_JSON
     try:
@@ -3851,12 +3852,20 @@ def _refresh_announcement_cache():
         clean = {'enabled': bool(cfg.get('enabled', True)),
                  'items': [it for it in cfg.get('items')
                            if isinstance(it, dict) and it.get('text')]}
+        # 内容规范化后与现有缓存一致 → 无更新，跳过写盘
+        if ANNOUNCEMENT_CACHE_JSON.exists():
+            try:
+                with open(ANNOUNCEMENT_CACHE_JSON, 'r', encoding='utf-8') as f:
+                    if json.load(f) == clean:
+                        return
+            except Exception:
+                pass  # 现有缓存损坏 → 走正常覆盖
         tmp = ANNOUNCEMENT_CACHE_JSON.with_suffix('.json.tmp')
         tmp.parent.mkdir(parents=True, exist_ok=True)
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(clean, f, ensure_ascii=False, indent=2)
         os.replace(tmp, ANNOUNCEMENT_CACHE_JSON)
-        print(f"[announcement] 已更新官网公告缓存: {ANNOUNCEMENT_CACHE_JSON}")
+        print(f"[announcement] 检测到官网公告更新，已写入缓存: {ANNOUNCEMENT_CACHE_JSON}")
     except Exception as e:
         print(f"[announcement] 拉取官网公告失败（保留本地缓存）: {e}")
 
