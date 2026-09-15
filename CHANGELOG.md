@@ -1,5 +1,14 @@
 # Changelog
 
+## v26.9.15.0 (2026-09-15)
+- **告警邮件/Webhook 通知（重磅，678aa95）**：新增 `modules/monitor/alert_notify.py` 告警状态机，完全复用设置页既有邮件 SMTP / 企业微信/钉钉 Webhook 通知配置；**状态迁移才发送**（正常→告警、warn/crit 等级变化、告警→恢复），同一告警绝不重发；服务启动时已处于异常的实例**合并发送一封摘要邮件**（防重启刷屏且不漏报）；多实例同轮告警 SMTP 串行发送防并发拒信；通知主题一眼明确问题（`[DBCheck][宕机] 实例(地址) 错误摘要`）。修复采集快照缺 `id` 字段导致状态机空转的缺陷。
+- **通知密码加密根修（678aa95）**：根治「解密邮件密码失败」——`_save_config` 整节点替换曾把首次生成的加密密钥冲掉致密文永久解不开；现显式保留密钥、配置文件原子写（tmp+os.replace）、解密路径不再生成密钥、配置持续损坏时拒绝保存（防清空其他配置节点）、失败提示记忆化只打一次且可操作。
+- **监控大屏连线重构（678aa95）**：列主干与主机→实例双竖线合并为**单主干母线**（消除叠加错位），主干恒为主题色、分支短线按节点状态着色（故障只红自身支线并闪烁），流动粒子全线等间距封顶 6 颗（永不交叠）；实例卡片改用**真实数据库 logo**（contain 拟合 + emoji 回退）、错误改右上角斜三角角标（点详情看完整错误）；卡片文案 `fitText` 自适应截断防溢出（319c664）。
+- **采集增强（678aa95 / a0a5fef）**：新增 MongoDB / Redis **原生采集通道**（`native_collect.py`，pymongo / redis-py）；GBase8s / DB2 / ClickHouse 补齐复制（repl）与锁等待（locks）指标 SQL；HGDB 等慢查询依赖缺失（如无 `pg_stat_statements` 扩展）按实例记忆化**静默降级**，次轮直达 fallback 不再刷错误日志；SSH 跳板信息在大屏展示。
+- **数据源修复（2aea899）**：编辑数据源时库名不回填且保存误变为新增。
+- **首页入口**：Hero 区新增「监控大屏」快捷按钮（主题色描边 + 呼吸绿点，9 语言 i18n）。
+- **版本统一**：各源文件版本标记 v26.9.14.1 → v26.9.15.0（version.py / version.json / Dockerfile / build 脚本 / CI / login.js / login.html / skill `dbcheck` `scripts/version.py` / deploy 脚本 / release_append）。
+
 ## v26.8.20.0 (2026-08-20)
 - **版本统一**：各源文件版本标记 v26.8.17.0 → v26.8.20.0（version.py / version.json / Dockerfile `VERSION.txt` / build 脚本 / CI / login.js / skill `dbcheck` `scripts/version.py` / deploy 脚本），消除版本漂移。
 - **JDBC 统一连接层（重磅）**：新增 `modules/jdbc_connector.py` 统一连接层，连接测试与 8 类 JDBC 巡检全部隔离到干净子进程执行（`jdbc_test_cli` / `jdbc_inspection_cli`），16 类数据库统一 JDBC 接入（PG 系 / MySQL 系批量收口），根治 gevent 下进程内 JVM/JPype 引发的界面卡死与死锁。
