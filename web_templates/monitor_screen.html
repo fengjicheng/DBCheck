@@ -647,14 +647,14 @@ function drawTopo(){
       // 第4行：错误 > 表空间/复制延迟 > 地址（按信息优先级展示其一）
       if (n.err){
         ctx.fillStyle = C.crit;
-        ctx.fillText(String(n.err).slice(0, 24), p.x + 12, p.y + 68);
+        ctx.fillText(fitText(n.err, instW - 24), p.x + 12, p.y + 68);
       } else {
         var extra = null, exC = C.warn;
         if (n.tbs_free_pct !== null && n.tbs_free_pct !== undefined) extra = S.node_tbs + ' ' + n.tbs_free_pct + '%';
         else if (n.repl_lag_s !== null && n.repl_lag_s !== undefined) extra = S.node_repl + ' ' + n.repl_lag_s + 's';
         else if (n.stat_hint) { extra = (n.stat_hint === 'view_server_state' ? S.hint_vss : S.hint_stat); exC = C.tx2; }
         ctx.fillStyle = extra ? exC : C.tx2;
-        ctx.fillText(extra || (n.host + ':' + n.port), p.x + 12, p.y + 68);
+        ctx.fillText(fitText(extra || (n.host + ':' + n.port), instW - 24), p.x + 12, p.y + 68);
       }
       // 连接利用率条（节点底边）
       var cu = n.conn ? (n.conn.usage_pct || 0) : 0;
@@ -678,6 +678,14 @@ function roundLabel(x, y, w, h, txt){
   ctx.globalAlpha = .22; ctx.fill(); ctx.globalAlpha = 1;
   ctx.fillStyle = C.tx; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
   ctx.fillText(txt, x + w / 2, y + h / 2 + .5);
+}
+
+/* 按当前字体与最大宽度自适应截断（超出加省略号），用于节点卡片内文本防溢出 */
+function fitText(txt, maxW){
+  txt = String(txt);
+  if (ctx.measureText(txt).width <= maxW) return txt;
+  while (txt.length > 1 && ctx.measureText(txt + '…').width > maxW) txt = txt.slice(0, -1);
+  return txt + '…';
 }
 
 /* 帧循环：flowT 推进 + 重绘 */
