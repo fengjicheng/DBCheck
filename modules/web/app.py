@@ -552,6 +552,18 @@ try:
 except Exception as _mon_e:
     print('[monitor] 采集器启动失败: %s' % _mon_e, flush=True)
 
+# ── 监控大屏采样器（六大域指标 → /api/dashboard/overview）──────
+# 大屏的连接数/慢查询指标复用 MonitorEngine，故未启动时顺带拉起（幂等）。
+try:
+    from modules.monitor.engine import get_monitor_engine as _get_me
+    from modules.monitor.screen_metrics import get_screen_collector as _get_sc
+    _me = _get_me()
+    if not _me.is_running:
+        _me.start()
+    _get_sc().start()
+except Exception as _sc_e:
+    print('[screen] 大屏采样器启动失败: %s' % _sc_e, flush=True)
+
 
 @app.route('/api/pro/metrics/summary')
 def api_pro_metrics_summary():
@@ -6039,6 +6051,35 @@ def api_rag_delete_document(doc_id):
 # ═══════════════════════════════════════════════════════════
 #  实时监控 API
 # ═══════════════════════════════════════════════════════════
+
+@app.route('/monitor-screen')
+def monitor_screen_page():
+    """监控大屏 — 独立全屏页（脱离主框架，可新标签打开 / 投屏）。"""
+    from flask import session, redirect
+    if not session.get('user_id'):
+        return redirect('/um/login')
+    # 大屏页文案走 i18n：一次取齐注入模板（JS 内再经 tojson 使用）
+    _keys = ['probe', 'subtitle', 'k_online', 'k_warn', 'k_crit', 'k_conn', 'k_qps', 'k_tps',
+             'btn_fs', 'topo_title', 'qps_top', 'conn_util_top', 'conns_top', 'trend',
+             'tbs_top', 'repl_top', 'lock_top', 'slowq_top', 'health',
+             'st_ok', 'st_warn', 'st_crit', 'st_down',
+             'node_status', 'node_conn', 'node_slowq', 'node_tbs', 'node_repl',
+             'no_data', 'ticker_label', 'ticker_empty', 'running', 'stopped',
+             'instances', 'fold_tip', 'total_n', 'n_hosts',
+             'd_status', 'd_type', 'd_addr', 'd_conn', 'd_active', 'd_util', 'd_qps',
+             'd_slowq', 'd_locks', 'd_repl', 'd_tbs', 'd_cache',
+             'hint_vss', 'hint_stat']
+    S = {k: _t('webui.screen_' + k) for k in _keys}
+    return render_template('monitor_screen.html', version=__version__, S=S)
+
+@app.route('/api/dashboard/overview', methods=['GET'])
+def api_dashboard_overview():
+    """大屏聚合数据：KPI + 分组 + TopN + 告警 + 拓扑节点，一次请求全部返回。"""
+    try:
+        from modules.monitor.screen_metrics import get_screen_collector, build_overview
+        return jsonify(build_overview(get_screen_collector()))
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)})
 
 @app.route('/api/monitor/slow-queries', methods=['GET'])
 def api_monitor_slow_queries():

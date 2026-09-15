@@ -58,6 +58,7 @@ data/autobackup/
 data/announcement.json
 data/announcement_cache.json
 data/announcement_cache.json.tmp
+data/tenants/
 drivers_bak/*
 commit_msg.txt
 docker_images/*

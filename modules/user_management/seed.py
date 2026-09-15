@@ -44,6 +44,7 @@ menus_data = [
     ('remote-shell',     'menu.remote-shell',    0, 43),
     ('monitor-slow',     'menu.monitor-slow',    0, 51),
     ('monitor-conn',     'menu.monitor-conn',    0, 52),
+    ('monitor-screen',   'menu.monitor-screen',  0, 53),
     ('ai',               'menu.ai',              0, 53),
     ('oracle-client',    'menu.oracle-client',   0, 54),
     ('notifier',         'menu.notifier',        0, 55),

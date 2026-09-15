@@ -178,7 +178,7 @@ ORDER BY qs.total_elapsed_time DESC
 SQLSERVER_CONNECTION_SQL = """
 SELECT TOP 50
     s.login_name AS username,
-    DB_NAME(t.database_id) AS database_name,
+    DB_NAME(s.database_id) AS database_name,
     COALESCE(r.command, 'idle') AS command,
     ROUND(DATEDIFF(SECOND, ISNULL(r.start_time, s.last_request_start_time), GETDATE()) / 3600.0, 1) AS duration_h,
     COALESCE(r.status, 'sleeping') AS state,
@@ -197,36 +197,40 @@ ORDER BY ISNULL(r.start_time, s.last_request_start_time) ASC
 # ═══════════════════════════════════════════════════════════════
 DM_SLOW_QUERY_SQL = """
 SELECT
-    SUBSTR(sql_text, 1, 200) AS sql_text,
-    ROUND(elapse_int / 1000000.0, 3) AS avg_time_s,
-    ROUND(elapse_int / 1000000.0, 3) AS max_time_s,
-    EXECUTE_COUNT AS exec_count,
-    ROUND(elapse_int / 1000000.0, 3) AS total_time_s,
-    SCHEMA_NAME AS schema_name,
+    SUBSTR(MAX(TOP_SQL_TEXT), 1, 200) AS sql_text,
+    ROUND(MAX(TIME_USED) / 1000000.0, 3) AS avg_time_s,
+    ROUND(MAX(TIME_USED) / 1000000.0, 3) AS max_time_s,
+    COUNT(*) AS exec_count,
+    ROUND(SUM(TIME_USED) / 1000000.0, 3) AS total_time_s,
+    NULL AS schema_name,
     SQL_ID AS digest
 FROM V$SQL_HISTORY
-WHERE SCHEMA_NAME NOT IN ('SYS', 'SYSSSO', 'SYSCMON', 'SYSJOB', 'SYSAUTH', 'SYSDMOP')
-ORDER BY elapse_int DESC
+WHERE TOP_SQL_TEXT IS NOT NULL
+GROUP BY SQL_ID
+ORDER BY SUM(TIME_USED) DESC
 LIMIT 30
 """
 
+# DM8 V$SESSIONS 实测列名（SESS_ID/CURR_SCH/APPNAME/SQL_TEXT，无 SCHEMA_NAME/PROGRAM_NAME）；
+# STATE 单字符（W=等待 R=运行 I=空闲），time 单位微秒。
+# 注意：不按 SES_ID() 过滤自连接——该内建在部分账号/环境下不可解析，且自连接本身
+# 也是一条真实连接，纳入计数无碍。
 DM_CONNECTION_SQL = """
 SELECT
     S.USER_NAME AS username,
-    S.SCHEMA_NAME AS database_name,
-    S.PROGRAM_NAME AS command,
-    ROUND(DATEDIFF(HOUR, S.LAST_RECV_TIME, CURDATE()) , 1) AS duration_h,
+    S.CURR_SCH AS database_name,
+    S.APPNAME AS command,
+    ROUND(DATEDIFF(HOUR, S.LAST_RECV_TIME, CURDATE()), 1) AS duration_h,
     CASE S.STATE
         WHEN 'W' THEN 'waiting'
         WHEN 'R' THEN 'running'
+        WHEN 'I' THEN 'idle'
         ELSE S.STATE
     END AS state,
-    SUBSTR(Q.SQL_TEXT, 1, 200) AS current_sql,
+    SUBSTR(S.SQL_TEXT, 1, 200) AS current_sql,
     (SELECT COUNT(*) FROM V$SESSIONS WHERE USER_NAME = S.USER_NAME) AS user_conn_count,
     (SELECT COUNT(*) FROM V$SESSIONS) AS total_connections
 FROM V$SESSIONS S
-LEFT JOIN V$SQLTEXT Q ON S.SQL_ID = Q.SQL_ID
-WHERE S.SESSION_ID != SES_ID()
 ORDER BY S.LAST_RECV_TIME ASC
 LIMIT 50
 """
@@ -285,8 +289,160 @@ LIMIT 50
 """
 
 # ═══════════════════════════════════════════════════════════════
+# GBase 8s（南大通用，Informix 血统；sysmaster 库系统表，经 JDBC 子进程通道）
+# ═══════════════════════════════════════════════════════════════
+
+# 慢查询：GBase 8s 无语句级统计视图，用「当前等待中会话」近似（等待即慢）。
+GBASE_SLOW_QUERY_SQL = """
+SELECT
+    s.sid AS digest,
+    TRIM(s.username) AS username,
+    COALESCE(w.wait_time, 0) AS avg_time_s,
+    COALESCE(w.wait_time, 0) AS max_time_s,
+    1 AS exec_count,
+    COALESCE(w.wait_time, 0) AS total_time_s,
+    COALESCE(TRIM(d.odb_dbname), '-') AS schema_name,
+    '等待中的会话（wait_time 秒）' AS sql_text
+FROM sysmaster:sysseswait w
+  LEFT JOIN sysmaster:syssessions s ON s.sid = w.sid
+  LEFT JOIN sysmaster:sysopendb d ON d.odb_sessionid = w.sid AND d.is_current = 'Y'
+LIMIT 30
+"""
+
+GBASE_CONNECTION_SQL = """
+SELECT
+    TRIM(s.username) AS username,
+    COALESCE(TRIM(d.odb_dbname), '-') AS database_name,
+    CASE WHEN w.sid IS NOT NULL THEN 'waiting'
+         WHEN s.sid = dbinfo('sessionid') THEN 'active'
+         ELSE 'idle' END AS state,
+    0 AS duration_h,
+    '' AS current_sql,
+    (SELECT COUNT(*) FROM sysmaster:syssessions s2 WHERE s2.username = s.username)
+        AS user_conn_count,
+    (SELECT COUNT(*) FROM sysmaster:syssessions) AS total_connections
+FROM sysmaster:syssessions s
+  LEFT JOIN sysmaster:sysopendb d ON d.odb_sessionid = s.sid AND d.is_current = 'Y'
+  LEFT JOIN sysmaster:sysseswait w ON w.sid = s.sid
+ORDER BY s.sid
+LIMIT 50
+"""
+
+# ═══════════════════════════════════════════════════════════════
+# DB2（IBM Db2，SYSIBMADM 管理视图，监控账号需 SYSMON 权限；JDBC 子进程通道）
+# ═══════════════════════════════════════════════════════════════
+
+# 慢查询：MON_CURRENT_SQL 为内存实时视图（当前执行 >= 1s 的语句）。
+# 列名经真实 DB2 LUW 实测：作者列是 SESSION_AUTH_ID（无 AUTHID 列，-206）。
+DB2_SLOW_QUERY_SQL = """
+SELECT
+    SUBSTR(STMT_TEXT, 1, 200) AS sql_text,
+    ELAPSED_TIME_SEC AS avg_time_s,
+    ELAPSED_TIME_SEC AS max_time_s,
+    1 AS exec_count,
+    ELAPSED_TIME_SEC AS total_time_s,
+    SESSION_AUTH_ID AS schema_name,
+    VARCHAR(APPLICATION_HANDLE) AS digest
+FROM SYSIBMADM.MON_CURRENT_SQL
+WHERE ELAPSED_TIME_SEC >= 1
+ORDER BY ELAPSED_TIME_SEC DESC
+FETCH FIRST 30 ROWS ONLY
+"""
+
+DB2_CONNECTION_SQL = """
+SELECT
+    AUTHID AS username,
+    COALESCE(DB_NAME, '-') AS database_name,
+    APPL_STATUS AS state,
+    0 AS duration_h,
+    APPL_NAME AS current_sql,
+    COUNT(*) OVER (PARTITION BY AUTHID) AS user_conn_count,
+    (SELECT COUNT(*) FROM SYSIBMADM.APPLICATIONS) AS total_connections
+FROM SYSIBMADM.APPLICATIONS
+WHERE AUTHID IS NOT NULL
+FETCH FIRST 50 ROWS ONLY
+"""
+
+# ═══════════════════════════════════════════════════════════════
+# ClickHouse（system 表；JDBC 子进程通道）
+# ═══════════════════════════════════════════════════════════════
+
+# 慢查询：主路径 system.query_log（需日志开启），回退 system.processes（实时）。
+CLICKHOUSE_SLOW_QUERY_SQL = """
+SELECT
+    SUBSTRING(query, 1, 200) AS sql_text,
+    ROUND(query_duration_ms / 1000, 3) AS avg_time_s,
+    ROUND(query_duration_ms / 1000, 3) AS max_time_s,
+    1 AS exec_count,
+    ROUND(query_duration_ms / 1000, 3) AS total_time_s,
+    user AS schema_name,
+    toString(event_time) AS digest
+FROM system.query_log
+WHERE type = 'QueryFinish' AND query_duration_ms >= 1000
+  AND event_date >= today() - 1
+ORDER BY query_duration_ms DESC
+LIMIT 30
+"""
+
+CLICKHOUSE_SLOW_QUERY_FALLBACK_SQL = """
+SELECT
+    SUBSTRING(query, 1, 200) AS sql_text,
+    ROUND(elapsed, 3) AS avg_time_s,
+    ROUND(elapsed, 3) AS max_time_s,
+    1 AS exec_count,
+    ROUND(elapsed, 3) AS total_time_s,
+    user AS schema_name,
+    toString(query_id) AS digest
+FROM system.processes
+WHERE elapsed >= 1
+ORDER BY elapsed DESC
+LIMIT 30
+"""
+
+CLICKHOUSE_CONNECTION_SQL = """
+SELECT
+    user AS username,
+    currentDatabase() AS database_name,
+    'active' AS state,
+    ROUND(elapsed / 3600, 1) AS duration_h,
+    SUBSTRING(query, 1, 200) AS current_sql,
+    COUNT(*) OVER () AS user_conn_count,
+    (SELECT value FROM system.metrics WHERE metric = 'TCPConnection')
+        AS total_connections
+FROM system.processes
+LIMIT 50
+"""
+
+# ═══════════════════════════════════════════════════════════════
 # SQL 模板映射
 # ═══════════════════════════════════════════════════════════════
+
+# 数据源/插件层的 db_type 标识 → monitor 查询模板键。
+# 插件 id 带 _jdbc 后缀（oracle_jdbc/sqlserver_jdbc），TDSQL-C 用专有名；
+# 国产 PG 系（hgdb/kingbase/uxdb/vastbase）连接走 PG 线协议，模板复用 pg。
+# 映射口径与 driver_registry.py 的 catalog 归并保持一致。
+_DB_TYPE_ALIASES = {
+    'oracle_jdbc': 'oracle',
+    'sqlserver_jdbc': 'sqlserver',
+    'tdsqlc_mysql': 'mysql',
+    'hgdb': 'pg', 'kingbase': 'pg', 'uxdb': 'pg', 'vastbase': 'pg',
+    'gbase8s': 'gbase',   # driver_registry catalog 名 → monitor 模板键
+}
+
+
+def normalize_db_type(db_type):
+    """归一 db_type 为 monitor 模板键（oracle_jdbc→oracle 等）。
+
+    模板/指标 family 查找与监控引擎的连接分派（_create_connection 的
+    python 驱动分支）均使用归一后的键。
+    """
+    dt = (db_type or '').strip().lower()
+    if dt in _DB_TYPE_ALIASES:
+        return _DB_TYPE_ALIASES[dt]
+    if dt.endswith('_jdbc') and dt[:-5] in SLOW_QUERY_TEMPLATES:
+        return dt[:-5]
+    return dt
+
 
 SLOW_QUERY_TEMPLATES = {
     'mysql': MYSQL_SLOW_QUERY_SQL,
@@ -298,6 +454,9 @@ SLOW_QUERY_TEMPLATES = {
     'sqlserver': SQLSERVER_SLOW_QUERY_SQL,
     'dm': DM_SLOW_QUERY_SQL,
     'tidb': TIDB_SLOW_QUERY_SQL,
+    'gbase': GBASE_SLOW_QUERY_SQL,
+    'db2': DB2_SLOW_QUERY_SQL,
+    'clickhouse': CLICKHOUSE_SLOW_QUERY_SQL,
 }
 
 SLOW_QUERY_FALLBACK_TEMPLATES = {
@@ -307,6 +466,7 @@ SLOW_QUERY_FALLBACK_TEMPLATES = {
     'pg': PG_SLOW_QUERY_FALLBACK_SQL,
     'ivorysql': PG_SLOW_QUERY_FALLBACK_SQL,
     'tidb': TIDB_SLOW_QUERY_FALLBACK_SQL,
+    'clickhouse': CLICKHOUSE_SLOW_QUERY_FALLBACK_SQL,
 }
 
 CONNECTION_TEMPLATES = {
@@ -319,6 +479,9 @@ CONNECTION_TEMPLATES = {
     'sqlserver': SQLSERVER_CONNECTION_SQL,
     'dm': DM_CONNECTION_SQL,
     'tidb': TIDB_CONNECTION_SQL,
+    'gbase': GBASE_CONNECTION_SQL,
+    'db2': DB2_CONNECTION_SQL,
+    'clickhouse': CLICKHOUSE_CONNECTION_SQL,
 }
 
 # 各数据库最大连接数默认值（用于计算使用率）
@@ -332,6 +495,9 @@ MAX_CONNECTION_DEFAULTS = {
     'sqlserver': 32767,
     'dm': 1000,
     'tidb': 16384,
+    'gbase': 100,       # Informix 血统无统一 max sessions 参数，用保守默认
+    'db2': 500,         # MAX_CONNECTIONS 因版本而异，取中位默认（查询失败时兜底）
+    'clickhouse': 4096, # 官方默认 max_connections
 }
 
 # 获取最大连接数的 SQL
@@ -345,4 +511,7 @@ MAX_CONN_QUERY_SQL = {
     'sqlserver': "SELECT 32767 AS max_conn",
     'dm': "SELECT VALUE AS max_conn FROM V$DM_INI WHERE PARA_NAME = 'MAX_SESSIONS'",
     'tidb': "SELECT @@global.max_connections AS max_conn",
+    # db2：DBCFG 对监控账号通常不可见（实测空行集），直接用 MAX_CONNECTION_DEFAULTS 兜底
+    'clickhouse': ("SELECT toUInt32(value) AS max_conn FROM system.server_settings "
+                   "WHERE name = 'max_connections'"),
 }

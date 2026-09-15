@@ -54,6 +54,16 @@ if '--jdbc-metrics-cli' in sys.argv[1:]:
     sys.exit(_jdbc_metrics_main())
 
 
+# ── 监控大屏 JDBC 批量采集隔离子进程入口（必须在单实例守卫之前）──────────
+# gbase / db2 / clickhouse 无 python 原生驱动，监控引擎每轮的批量采集依赖
+# JPype 在进程内启动 JVM；同样会把 gevent hub 钉死冻结整个界面。主进程只
+# spawn + 解析 JSON（MonitorEngine._jdbc_run_batch），绝不起 JVM。
+if '--jdbc-collect-cli' in sys.argv[1:]:
+    from modules.monitor.jdbc_collect_cli import main as _jdbc_collect_main
+
+    sys.exit(_jdbc_collect_main())
+
+
 def _acquire_single_instance():
     # 仅对 PyInstaller 冻结后的 exe 生效；开发态 `python web_ui.py` 不限制，便于多开调试。
     if not getattr(sys, 'frozen', False):

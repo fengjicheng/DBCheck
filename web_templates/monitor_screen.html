@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RaccoonX · 数据库监控大屏</title>
+<!-- ECharts 本地离线包（与主界面同源），无网环境可用 -->
+<script src="/static/js/echarts.min.js"></script>
+<style>
+  :root {
+    --bg: #0B1220; --panel: #0E1626; --panel2: #111C30; --border: #1C2A44;
+    --tx: #D7E1F0; --tx2: #8FA3C0; --accent: #00C8A0; --blue: #38BDF8;
+    --ok: #22C55E; --warn: #F59E0B; --crit: #EF4444; --down: #6B7280;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--tx); overflow: hidden;
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    display: flex; flex-direction: column;
+  }
+  /* ── 顶栏 ── */
+  header {
+    height: 56px; flex: none; display: flex; align-items: center; gap: 18px;
+    padding: 0 18px; border-bottom: 1px solid var(--border); background: var(--panel);
+  }
+  .logo { display: flex; align-items: baseline; gap: 8px; }
+  .logo b { font-size: 19px; color: var(--accent); letter-spacing: .5px; }
+  .logo span { font-size: 13px; color: var(--tx2); }
+  .kpis { display: flex; gap: 10px; margin-left: 12px; flex: 1; min-width: 0; flex-wrap: nowrap; }
+  .kpi {
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 9px;
+    padding: 5px 12px; min-width: 86px; text-align: center; white-space: nowrap;
+  }
+  .kpi .v { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .kpi .l { font-size: 11px; color: var(--tx2); }
+  .kpi.ok .v { color: var(--ok); } .kpi.warn .v { color: var(--warn); }
+  .kpi.crit .v { color: var(--crit); } .kpi.acc .v { color: var(--accent); }
+  .kpi.blue .v { color: var(--blue); }
+  #clock { font-size: 15px; color: var(--tx2); font-variant-numeric: tabular-nums; }
+  #btn-fs {
+    background: var(--panel2); color: var(--tx); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 14px; font-size: 13px; cursor: pointer;
+  }
+  #btn-fs:hover { border-color: var(--accent); color: var(--accent); }
+  /* ── 主体三栏 ── */
+  main { flex: 1; display: grid; grid-template-columns: 23% 1fr 23%; gap: 10px; padding: 10px; min-height: 0; }
+  aside { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+  .panel {
+    flex: 1; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  }
+  .panel h3 {
+    font-size: 12.5px; font-weight: 500; color: var(--tx2);
+    padding: 9px 12px 0; letter-spacing: .5px;
+    display: flex; align-items: center; gap: 7px;
+  }
+  .panel h3::before {
+    content: ''; width: 3px; height: 11px; border-radius: 2px;
+    background: linear-gradient(180deg, var(--accent), var(--blue));
+  }
+  .chart { flex: 1; min-height: 0; }
+  /* ── 表空间进度列表（替代 ECharts 条形：标签完整、等级配色、可点下钻） ── */
+  .tbs-list { flex: 1; min-height: 0; overflow-y: auto; padding: 9px 12px 10px;
+              display: flex; flex-direction: column; gap: 7px; }
+  .tbs-list::-webkit-scrollbar { width: 4px; }
+  .tbs-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .trow { display: grid; grid-template-columns: 16px minmax(0,1fr) 108px 42px;
+          align-items: center; gap: 8px; padding: 1px 4px; border-radius: 6px; cursor: pointer; }
+  .trow:hover { background: rgba(255,255,255,.045); }
+  .trow .rk { font-size: 10px; color: var(--tx2); text-align: center; }
+  .trow .rk.top { color: var(--warn); font-weight: 600; }
+  .trow .nm { font-size: 11.5px; color: var(--tx); white-space: nowrap;
+              overflow: hidden; text-overflow: ellipsis; }
+  .trow .track { height: 9px; background: rgba(255,255,255,.055); border-radius: 5px; overflow: hidden; }
+  .trow .fill { display: block; height: 100%; border-radius: 5px; }
+  .trow .val { font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
+  .no-data { flex: 1; display: flex; align-items: center; justify-content: center;
+             color: var(--tx2); font-size: 12px; }
+  /* ── 拓扑分页器 ── */
+  #pageNav {
+    position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+    display: none; align-items: center; gap: 8px; z-index: 15;
+    background: rgba(13,22,40,.92); border: 1px solid var(--border); border-radius: 10px;
+    padding: 4px 10px;
+  }
+  #pageNav button {
+    background: none; border: none; color: var(--tx); font-size: 13px;
+    cursor: pointer; padding: 2px 6px; border-radius: 6px;
+  }
+  #pageNav button:hover { color: var(--accent); background: rgba(255,255,255,.06); }
+  #pageNav button:disabled { color: var(--tx2); opacity: .4; cursor: default; }
+  #pg-ind { font-size: 12px; color: var(--tx2); min-width: 42px; text-align: center;
+            font-variant-numeric: tabular-nums; }
+  /* ── 中央拓扑 ── */
+  #topo-panel { position: relative; }
+  #topo { position: absolute; inset: 30px 0 0 0; width: 100%; height: calc(100% - 30px); cursor: grab; }
+  #topo.dragging { cursor: grabbing; }
+  .topo-tip {
+    position: absolute; display: none; pointer-events: none; z-index: 20;
+    background: rgba(13, 22, 40, .96); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 12px; font-size: 12px; line-height: 1.75;
+    color: var(--tx); max-width: 320px;
+  }
+  .topo-tip b { color: var(--accent); font-size: 13px; }
+  .topo-tip .muted { color: var(--tx2); }
+  #detail {
+    position: absolute; right: 12px; top: 40px; width: 300px; display: none; z-index: 21;
+    background: rgba(13, 22, 40, .97); border: 1px solid var(--border); border-radius: 12px;
+    padding: 12px 14px; font-size: 12.5px; line-height: 1.85;
+  }
+  #detail h4 { font-size: 14px; color: var(--accent); font-weight: 600; margin-bottom: 4px; }
+  #detail .close {
+    position: absolute; right: 10px; top: 8px; background: none; border: none;
+    color: var(--tx2); font-size: 14px; cursor: pointer;
+  }
+  #detail table { width: 100%; border-collapse: collapse; }
+  #detail td { padding: 1px 0; }
+  #detail td:last-child { text-align: right; color: var(--tx); font-variant-numeric: tabular-nums; }
+  #detail td:first-child { color: var(--tx2); }
+  /* ── 底栏告警 ── */
+  footer {
+    height: 40px; flex: none; border-top: 1px solid var(--border); background: var(--panel);
+    display: flex; align-items: center; overflow: hidden; position: relative;
+  }
+  .ticker-label {
+    flex: none; padding: 0 14px; font-size: 12.5px; color: var(--crit);
+    border-right: 1px solid var(--border); height: 100%; display: flex; align-items: center;
+    background: var(--panel2); z-index: 2;
+  }
+  .ticker-wrap { flex: 1; overflow: hidden; height: 100%; display: flex; align-items: center; }
+  #ticker { display: inline-flex; gap: 34px; white-space: nowrap; font-size: 12.5px; will-change: transform; }
+  #ticker .a-crit { color: var(--crit); } #ticker .a-warn { color: var(--warn); }
+  #ticker .empty { color: var(--tx2); }
+  .probe-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo"><b>RaccoonX</b><span>{{ S.subtitle }} · {{ version }}</span></div>
+  <div class="kpis">
+    <div class="kpi ok"><div class="v" id="k-online">–</div><div class="l">{{ S.k_online }}</div></div>
+    <div class="kpi warn"><div class="v" id="k-warn">–</div><div class="l">{{ S.k_warn }}</div></div>
+    <div class="kpi crit"><div class="v" id="k-crit">–</div><div class="l">{{ S.k_crit }}</div></div>
+    <div class="kpi blue"><div class="v" id="k-conn">–</div><div class="l">{{ S.k_conn }}</div></div>
+    <div class="kpi acc"><div class="v" id="k-qps">–</div><div class="l">{{ S.k_qps }}</div></div>
+    <div class="kpi acc"><div class="v" id="k-tps">–</div><div class="l">{{ S.k_tps }}</div></div>
+  </div>
+  <div id="clock">--:--:--</div>
+  <button id="btn-fs" onclick="toggleFs()">{{ S.btn_fs }}</button>
+</header>
+
+<main>
+  <aside>
+    <div class="panel"><h3>{{ S.qps_top }}</h3><div class="chart" id="c-qps"></div></div>
+    <div class="panel"><h3>{{ S.conn_util_top }}</h3><div class="chart" id="c-conn"></div></div>
+    <div class="panel"><h3>{{ S.conns_top }}</h3><div class="chart" id="c-conns"></div></div>
+    <div class="panel"><h3>{{ S.trend }}</h3><div class="chart" id="c-trend"></div></div>
+  </aside>
+
+  <div class="panel" id="topo-panel">
+    <h3>{{ S.topo_title }}</h3>
+    <canvas id="topo"></canvas>
+    <div class="topo-tip" id="tip"></div>
+    <div id="pageNav">
+      <button id="pg-prev" onclick="turnPage(-1)">◀</button>
+      <span id="pg-ind"></span>
+      <button id="pg-next" onclick="turnPage(1)">▶</button>
+    </div>
+    <div id="detail"><button class="close" onclick="closeDetail()">✕</button><div id="detail-body"></div></div>
+  </div>
+
+  <aside>
+    <div class="panel"><h3>{{ S.tbs_top }}</h3><div class="tbs-list" id="tbs-list"></div></div>
+    <div class="panel"><h3>{{ S.repl_top }}</h3><div class="chart" id="c-repl"></div></div>
+    <div class="panel"><h3>{{ S.lock_top }}</h3><div class="chart" id="c-lock"></div></div>
+    <div class="panel"><h3>{{ S.slowq_top }}</h3><div class="chart" id="c-slow"></div></div>
+    <div class="panel"><h3>{{ S.health }}</h3><div class="chart" id="c-health"></div></div>
+  </aside>
+</main>
+
+<footer>
+  <div class="ticker-label">{{ S.ticker_label }}</div>
+  <div class="ticker-wrap"><div id="ticker"></div></div>
+</footer>
+
+<script>
+'use strict';
+/* ══════════════ 基础 ══════════════ */
+var S = {{ S | tojson }};
+var C = { bg:'#0B1220', panel:'#0E1626', border:'#1C2A44', tx:'#D7E1F0', tx2:'#8FA3C0',
+          accent:'#00C8A0', blue:'#38BDF8', ok:'#22C55E', warn:'#F59E0B', crit:'#EF4444', down:'#6B7280' };
+var TYPE_META = {
+  mysql:['My','#0891B2'], mariadb:['Ma','#0E7490'], oceanbase:['OB','#2563EB'], tidb:['Ti','#DC2626'],
+  postgresql:['Pg','#4F46E5'], pg:['Pg','#4F46E5'], ivorysql:['IV','#7C3AED'], kingbase:['KB','#6366F1'],
+  hgdb:['HG','#0EA5E9'], oracle:['Or','#E11D48'], sqlserver:['MS','#9333EA'], dm:['DM','#D97706'],
+  mongodb:['Mg','#16A34A']
+};
+function typeMeta(t){ return TYPE_META[(t||'').toLowerCase()] || ['DB', '#5F5E5A']; }
+function fmt(n, unit){ return (n === null || n === undefined) ? '–' : n + (unit || ''); }
+function openDetailById(iid){
+  if (!iid) return;
+  for (var i = 0; i < topoData.length; i++){
+    if (topoData[i].id === iid){
+      pinnedId = topoData[i].id;
+      document.getElementById('detail-body').innerHTML = detailHtml(topoData[i]);
+      document.getElementById('detail').style.display = 'block';
+      return;
+    }
+  }
+}
+var charts = {};
+function chart(id){
+  if (charts[id]) return charts[id];
+  var el = document.getElementById(id);
+  charts[id] = echarts.init(el);
+  // 点条形 → 打开对应实例详情（数据项须带 iid）
+  charts[id].on('click', function(p){
+    if (p.data && p.data.iid) openDetailById(p.data.iid);
+  });
+  return charts[id];
+}
+var BASE_GRID = { left: 6, right: 48, top: 8, bottom: 4, containLabel: true };
+var TIP_STYLE = {
+  backgroundColor: '#131E33', borderColor: C.border, borderWidth: 1,
+  textStyle: { color: C.tx, fontSize: 12 },
+  extraCssText: 'box-shadow:0 4px 14px rgba(0,0,0,.45);border-radius:6px;'
+};
+/* 横向渐变条：左淡右实，比纯色块更有质感 */
+function grad(hex){
+  return new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+    { offset: 0, color: hex + '59' }, { offset: 1, color: hex }]);
+}
+/* 等级配色：表空间按剩余越多越安全；连接利用率按越高越危险 */
+function tbsColor(v){ return v <= 15 ? C.crit : v <= 30 ? C.warn : C.ok; }
+function pctColor(v){ return v >= 95 ? C.crit : v >= 80 ? C.warn : C.blue; }
+function barOpt(data, color, opts){
+  opts = opts || {};
+  var names = data.map(function(d){ return d.name; });
+  var barData = data.map(function(d){
+    var c = opts.colorFn ? opts.colorFn(d.value) : color;
+    return { value: d.value, iid: d.id, itemStyle: { color: grad(c) },
+             label: { color: c } };   // 数值标签与条同色，等级一眼可辨
+  });
+  return {
+    animation: false,
+    grid: BASE_GRID,
+    tooltip: Object.assign({ trigger: 'axis', axisPointer: { type: 'shadow',
+               shadowStyle: { color: 'rgba(255,255,255,.04)' } },
+               formatter: function(p){ var d = data[p[0].dataIndex];
+                 return d.tip || esc(d.name) + '：<b>' + d.value + (opts.unit || '') + '</b>'; } }, TIP_STYLE),
+    xAxis: opts.hideX ? { show: false, max: opts.max } :
+           { type: 'value', axisLabel: { color: C.tx2, fontSize: 10 },
+             splitLine: { lineStyle: { color: C.border, type: 'dashed' } } },
+    yAxis: { type: 'category', data: names.reverse(), inverse: false,
+             axisLabel: { color: C.tx, fontSize: 10.5, width: 118, overflow: 'truncate', interval: 0 },
+             axisLine: { lineStyle: { color: C.border } }, axisTick: { show: false } },
+    series: [{ type: 'bar', data: barData.reverse(), barWidth: opts.barW || 8,
+      showBackground: !!opts.showBg,
+      backgroundStyle: { color: 'rgba(255,255,255,.045)', borderRadius: [0, 5, 5, 0] },
+      itemStyle: { borderRadius: [0, 5, 5, 0] },
+      label: { show: true, position: 'right', fontSize: 10,
+               formatter: function(p){ return p.value + (opts.unit || ''); } },
+      ...(opts.markLine ? { markLine: { silent: true, symbol: 'none',
+        lineStyle: { color: C.crit, type: 'dashed', width: 1 },
+        label: { show: false }, data: [{ xAxis: 80 }] } } : {}) }]
+  };
+}
+/* 无数据时图面显示「暂无数据」而非空坐标轴 */
+function setBar(id, arr, color, opts){
+  var opt = barOpt(arr || [], color, opts || {});
+  if (!(arr || []).length){
+    opt.graphic = [{ type: 'text', left: 'center', top: 'middle',
+      style: { text: S.no_data, fill: C.tx2, fontSize: 12 } }];
+    opt.xAxis.show = false; opt.yAxis.show = false;
+  }
+  chart(id).setOption(opt, true);
+}
+
+/* ══════════════ 拓扑画布 ══════════════ */
+var topo = document.getElementById('topo');
+var ctx = topo.getContext('2d');
+var view = { scale: 1, ox: 0, oy: 0, drag: false, dx: 0, dy: 0, moved: false };
+var nodes = [];        // 屏幕坐标矩形（含世界坐标），每帧重建
+var world = { w: 800, h: 600 };
+var topoData = [];     // 实例节点数据
+var foldedGroups = {}; // group → true(手动开合)
+var pinnedId = null;
+var flowT = 0;
+
+function resizeCanvas(){
+  var r = topo.getBoundingClientRect();
+  var dpr = window.devicePixelRatio || 1;
+  topo.width = r.width * dpr; topo.height = r.height * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener('resize', function(){ fittedForCount = -1; resizeCanvas(); layoutCharts(); });
+
+function statusColor(s){
+  return s === 'down' ? C.down : s === 'crit' ? C.crit : s === 'warn' ? C.warn : C.ok;
+}
+
+/* 布局几何常量（layout 与 drawTopo 共用）；instH=82 为含内联指标的多行卡片 */
+var instW = 210, instH = 82, hostH = 26, vGap = 10, hostColGap = 24;
+
+/* ── 分页常量：实例数超阈值时按页排版（报警组优先靠前，页内最多 3 列） ── */
+var PAGE_THRESHOLD = 36, PAGE_COLS = 3, PAGE_COL_BUDGET = 800;
+var topoPage = 0, topoPages = 1;
+function turnPage(d){
+  topoPage = Math.min(Math.max(topoPage + d, 0), topoPages - 1);
+  fittedForCount = -1;   // 换页后重新拟合视口
+}
+function updatePageNav(){
+  var nav = document.getElementById('pageNav');
+  if (!nav) return;
+  if (topoPages > 1){
+    nav.style.display = 'flex';
+    document.getElementById('pg-ind').textContent = (topoPage + 1) + ' / ' + topoPages;
+    document.getElementById('pg-prev').disabled = topoPage === 0;
+    document.getElementById('pg-next').disabled = topoPage >= topoPages - 1;
+  } else nav.style.display = 'none';
+}
+
+/* 布局：探针顶部居中 → 分组列（组内按 host 分块，实例挂 host 下） */
+function layout(data){
+  var groups = {};
+  data.forEach(function(n){ (groups[n.group] = groups[n.group] || []).push(n); });
+  var gNames = Object.keys(groups).sort();
+  var COL_W = 208, GAP = 18, x0 = 40, y0 = 40;
+  var byHost = {};
+  data.forEach(function(n){
+    var hk = n.group + '\u0001' + n.host;
+    (byHost[hk] = byHost[hk] || { group: n.group, host: n.host, insts: [] }).insts.push(n);
+  });
+  var hostList = Object.keys(byHost).map(function(k){ return byHost[k]; });
+  var hostCol = {}; // host → {x, y, w}
+  var instPos = {}; // iid → {x, y}
+  var colTrunks = []; // 列主干：{x, ys[]}，探针母线沿此给整列主机供电
+  var maxRowsPerCol = 0;
+  var foldThreshold = 20; // 单组实例超过此数 → 默认折叠为机柜节点
+
+  /* 组 → 展示块列表（折叠=1 个机柜块；展开=每 host 一块），块高按世界像素估算 */
+  function groupBlocks(g){
+    var gHosts = hostList.filter(function(h){ return h.group === g; });
+    var gInsts = groups[g];
+    var folded = gInsts.length > foldThreshold;
+    if (foldedGroups[g] !== undefined) folded = foldedGroups[g];
+    // 含严重告警的组强制展开
+    if (gInsts.length > foldThreshold && gInsts.some(function(n){ return n.status === 'down' || n.status === 'crit'; }) && foldedGroups[g] === undefined) folded = false;
+    if (folded){
+      var alarms = gInsts.filter(function(n){ return n.status === 'down' || n.status === 'crit'; }).slice(0, 12);
+      return [{ fold: true, group: g, insts: alarms,
+        counts: [gInsts.filter(function(n){ return n.status === 'ok'; }).length,
+                 gInsts.filter(function(n){ return n.status === 'warn'; }).length,
+                 alarms.length],
+        total: gInsts.length,
+        h: 44 + alarms.length * (instH + vGap) }];
+    }
+    return gHosts.map(function(h){
+      return { group: g, host: h.host, insts: h.insts,
+               h: hostH + 6 + h.insts.length * (instH + vGap) };
+    });
+  }
+
+  if (data.length <= PAGE_THRESHOLD){
+    /* ── 小规模：单页，组内 host 块排两列（原有逻辑不变） ── */
+    var cx = x0;
+    gNames.forEach(function(g){
+      var gHosts = hostList.filter(function(h){ return h.group === g; });
+      var gInsts = groups[g];
+      var folded = gInsts.length > foldThreshold;
+      if (foldedGroups[g] !== undefined) folded = foldedGroups[g];
+      if (gInsts.length > foldThreshold && gInsts.some(function(n){ return n.status === 'down' || n.status === 'crit'; }) && foldedGroups[g] === undefined) folded = false;
+      gHosts.forEach(function(h){ h._folded = folded; });
+      if (folded){
+        var cw = 180, chh = 44;
+        var nOk = gInsts.filter(function(n){ return n.status === 'ok'; }).length;
+        var nWarn = gInsts.filter(function(n){ return n.status === 'warn'; }).length;
+        var nCrit = gInsts.filter(function(n){ return n.status === 'down' || n.status === 'crit'; }).length;
+        hostCol[g + '\u0001FOLD'] = { x: cx, y: y0 + 46, w: cw, h: chh, fold: true, group: g,
+          counts: [nOk, nWarn, nCrit], total: gInsts.length };
+        var yy = y0 + 46 + chh + vGap;
+        gInsts.filter(function(n){ return n.status === 'down' || n.status === 'crit'; }).slice(0, 12).forEach(function(n){
+          instPos[n.id] = { x: cx + (cw - instW) / 2, y: yy }; yy += instH + vGap;
+        });
+        maxRowsPerCol = Math.max(maxRowsPerCol, (yy - y0) / (instH + vGap));
+        cx += cw + GAP + 12;
+      } else {
+        var colH = [y0 + 46, y0 + 46];
+        var colX = [cx, cx + instW + hostColGap];
+        var colYs = [[], []];
+        var rowsUsed = 0;
+        gHosts.forEach(function(h, hi){
+          var col = colH[0] <= colH[1] ? 0 : 1;
+          var hx = colX[col], hy = colH[col];
+          var n = h.insts.length;
+          hostCol[h.group + '\u0001' + h.host] = { x: hx, y: hy, w: instW, h: hostH,
+                                                   host: h.host, group: h.group };
+          colYs[col].push(hy + hostH / 2);
+          h.insts.forEach(function(nod, ii){
+            instPos[nod.id] = { x: hx, y: hy + hostH + 6 + ii * (instH + vGap) };
+          });
+          colH[col] = hy + hostH + 6 + n * (instH + vGap) + 16;
+          rowsUsed = Math.max(rowsUsed, Math.max(colH[0], colH[1]));
+        });
+        colYs.forEach(function(ys, ci){ if (ys.length) colTrunks.push({ x: colX[ci] - 12, ys: ys }); });
+        maxRowsPerCol = Math.max(maxRowsPerCol, (rowsUsed - y0) / (instH + vGap));
+        cx += (instW + hostColGap) * 2 + GAP + 12;
+      }
+    });
+    topoPages = 1; topoPage = 0;
+    world.w = Math.max(cx + 40, 600);
+  } else {
+    /* ── 大规模：分页排版。报警组优先靠前，块装箱进「页=最多 3 列」，块不跨页 ── */
+    gNames.sort(function(a, b){
+      function w(g){
+        var gs = groups[g];
+        if (gs.some(function(n){ return n.status === 'down' || n.status === 'crit'; })) return 0;
+        if (gs.some(function(n){ return n.status === 'warn'; })) return 1;
+        return 2;
+      }
+      return w(a) - w(b) || (a < b ? -1 : 1);
+    });
+    var blocks = [];
+    gNames.forEach(function(g){ blocks = blocks.concat(groupBlocks(g)); });
+    var pages = [[[]]];  // pages[页][列] = [块…]
+    blocks.forEach(function(b){
+      var placed = false;
+      for (var p = pages.length - 1; p >= 0 && !placed; p--){
+        var cols = pages[p];
+        for (var ci = 0; ci < cols.length; ci++){
+          var used = cols[ci].reduce(function(s, it){ return s + it.block.h + 14; }, 0);
+          if (used + b.h + 14 <= PAGE_COL_BUDGET){ cols[ci].push({ block: b }); placed = true; break; }
+        }
+        if (!placed && cols.length < PAGE_COLS){ cols.push([{ block: b }]); placed = true; }
+      }
+      if (!placed) pages.push([[{ block: b }]]);
+    });
+    topoPages = pages.length;
+    if (topoPage >= topoPages) topoPage = topoPages - 1;
+    var page = pages[topoPage];
+    var colW = instW + hostColGap;
+    page.forEach(function(col, ci){
+      var yy = y0 + 46;
+      var ys = [];
+      col.forEach(function(it){
+        var b = it.block;
+        if (b.fold){
+          hostCol[b.group + '\u0001FOLD'] = { x: x0 + ci * colW + (instW - 180) / 2, y: yy,
+            w: 180, h: 44, fold: true, group: b.group, counts: b.counts, total: b.total };
+          var ay = yy + 44 + vGap;
+          b.insts.forEach(function(n){ instPos[n.id] = { x: x0 + ci * colW, y: ay }; ay += instH + vGap; });
+        } else {
+          hostCol[b.group + '\u0001' + b.host] = { x: x0 + ci * colW, y: yy, w: instW, h: hostH,
+                                                   host: b.host, group: b.group };
+          ys.push(yy + hostH / 2);
+          b.insts.forEach(function(nod, ii){
+            instPos[nod.id] = { x: x0 + ci * colW, y: yy + hostH + 6 + ii * (instH + vGap) };
+          });
+        }
+        yy += b.h + 14;
+      });
+      if (ys.length) colTrunks.push({ x: x0 + ci * colW - 12, ys: ys });
+      maxRowsPerCol = Math.max(maxRowsPerCol, (yy - y0) / (instH + vGap));
+    });
+    world.w = Math.max(x0 + PAGE_COLS * colW + 30, 600);
+  }
+  world.h = Math.max(y0 + 46 + maxRowsPerCol * (instH + vGap) + 30, 500);
+  return { hostCol: hostCol, instPos: instPos, columnTrunks: colTrunks };
+}
+
+var layoutCache = { hostCol: {}, instPos: {} };
+var fittedForCount = -1;   // 上次拟合时的实例数（数据变化/窗口变化时重拟合）
+
+function fitView(W, H){
+  if (!world.w) return;
+  // 宽高双向拟合，保证上百台时全景可见；用户仍可缩放平移，数据量不变则不打扰
+  var s = Math.min((W - 20) / world.w, (H - 20) / world.h, 1);
+  view.scale = Math.max(s, 0.25);
+  view.ox = (W - world.w * view.scale) / 2;
+  view.oy = 8;
+  fittedForCount = topoData.length;
+}
+
+function drawTopo(){
+  var W = topo.getBoundingClientRect().width, H = topo.getBoundingClientRect().height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.save();
+  nodes = [];
+  var data = topoData;
+  var L = layout(data);      // 先重算世界尺寸
+  layoutCache = L;
+  if (fittedForCount !== topoData.length) fitView(W, H);   // 再按最新世界拟合
+  ctx.translate(view.ox, view.oy); ctx.scale(view.scale, view.scale);
+  var probe = { x: world.w / 2 - 70, y: 6, w: 140, h: 30 };
+
+  function rr(x, y, w, h, r){ ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
+
+  // 探针节点
+  ctx.fillStyle = '#13223C'; ctx.strokeStyle = C.accent; ctx.lineWidth = 1;
+  rr(probe.x, probe.y, probe.w, probe.h, 7); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = C.tx; ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('◉ ' + S.probe, probe.x + probe.w / 2, probe.y + probe.h / 2);
+  nodes.push({ x: probe.x, y: probe.y, w: probe.w, h: probe.h, kind: 'probe',
+               wx: probe.x, wy: probe.y });
+  updatePageNav();
+
+  function link(x1, y1, x2, y2, st){
+    var col = statusColor(st);
+    ctx.beginPath(); ctx.moveTo(x1, y1);
+    var mx = (x1 + x2) / 2;
+    ctx.bezierCurveTo(mx, y1, mx, y2, x2, y2);
+    if (st === 'down'){
+      ctx.strokeStyle = C.crit; ctx.setLineDash([4, 4]);
+      ctx.lineDashOffset = -flowT * 30;
+      ctx.globalAlpha = 0.5 + 0.5 * Math.sin(flowT * 5);
+      ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+      return;
+    }
+    ctx.strokeStyle = col; ctx.globalAlpha = .5; ctx.lineWidth = 1; ctx.stroke(); ctx.globalAlpha = 1;
+    // 流动光点
+    var t = (flowT * (st === 'warn' ? .25 : .5) + ((x1 + y2) % 10) / 10) % 1;
+    var px = bez(t, x1, mx, x2), py = bezY(t, y1, y1, y2, y2, mx);
+    ctx.fillStyle = col; ctx.beginPath(); ctx.arc(px, py, 2, 0, 6.3); ctx.fill();
+  }
+  function bez(t, a, b, c){ var u = 1 - t; return u*u*a + 2*u*t*b + t*t*c; }
+  function bezY(t, y1, c1, c2, y2, mx){ var u = 1 - t; return u*u*u*y1 + 3*u*u*t*c1 + 3*u*t*t*c2 + t*t*t*y2; }
+
+  var probeCX = probe.x + probe.w / 2, probeBY = probe.y + probe.h;
+
+  // 探针 → 列主干：入干曲线走「探针与首行主机」之间的空带，垂直主干沿列左侧给各主机供电（不穿越节点）
+  // （必须在 probeCX 定义之后绘制，否则坐标为 undefined 导致连线悬空）
+  var CHANNEL_Y = 60; // 探针(底 36) 与首行主机(顶 86) 之间的空带
+  (L.columnTrunks || []).forEach(function(t, ti){
+    ctx.strokeStyle = C.accent; ctx.globalAlpha = .5; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(probeCX, probeBY);
+    ctx.bezierCurveTo(probeCX, CHANNEL_Y - 8, t.x, CHANNEL_Y - 8, t.x, CHANNEL_Y);
+    ctx.stroke();
+    var yEnd = t.ys[t.ys.length - 1];
+    ctx.beginPath(); ctx.moveTo(t.x, CHANNEL_Y); ctx.lineTo(t.x, yEnd); ctx.stroke();
+    t.ys.forEach(function(y, i){
+      ctx.beginPath(); ctx.moveTo(t.x, y); ctx.lineTo(t.x + 12, y); ctx.stroke();
+      // 主干流动光点（相位错开）
+      var tt = (flowT * .45 + i * .27 + ti * .13) % 1;
+      ctx.fillStyle = C.accent; ctx.globalAlpha = .9;
+      ctx.beginPath(); ctx.arc(t.x, CHANNEL_Y + (yEnd - CHANNEL_Y) * tt, 1.8, 0, 6.3); ctx.fill();
+      ctx.globalAlpha = .5;
+    });
+    ctx.globalAlpha = 1;
+  });
+
+  Object.keys(L.hostCol).forEach(function(hk){
+    var h = L.hostCol[hk];
+    if (h.fold){
+      // 机柜节点
+      var st = h.counts[2] > 0 ? 'crit' : h.counts[1] > 0 ? 'warn' : 'ok';
+      link(probeCX, probeBY, h.x + h.w / 2, h.y, st);
+      ctx.fillStyle = '#13223C'; ctx.strokeStyle = statusColor(st); ctx.lineWidth = 1.2;
+      rr(h.x, h.y, h.w, h.h, 8); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = C.tx; ctx.font = '12px sans-serif'; ctx.textAlign = 'left';
+      ctx.fillText('▤ ' + h.group, h.x + 10, h.y + 14);
+      ctx.font = '11px sans-serif';
+      ctx.fillStyle = C.ok;  ctx.fillText('●' + h.counts[0], h.x + 10, h.y + 32);
+      ctx.fillStyle = C.warn; ctx.fillText('●' + h.counts[1], h.x + 56, h.y + 32);
+      ctx.fillStyle = C.crit; ctx.fillText('●' + h.counts[2], h.x + 102, h.y + 32);
+      ctx.fillStyle = C.tx2; ctx.fillText(h.total + '台', h.x + h.w - 34, h.y + 32);
+      nodes.push({ x: h.x, y: h.y, w: h.w, h: h.h, kind: 'fold', group: h.group,
+                   wx: h.x, wy: h.y, counts: h.counts, total: h.total });
+      // 折叠组：柜下仍展示告警实例卡片（下钻入口）
+      topoData.filter(function(n){
+        return n.group === h.group && (n.status === 'down' || n.status === 'crit') && L.instPos[n.id];
+      }).slice(0, 12).forEach(drawInstCard);
+      return;
+    }
+    var insts = topoData.filter(function(n){ return (n.group + '\u0001' + n.host) === hk; });
+    var hst = stOf(insts);
+    // 服务器节点
+    ctx.fillStyle = '#101E36'; ctx.strokeStyle = '#2A3E63'; ctx.lineWidth = 1;
+    rr(h.x, h.y, h.w, h.h, 6); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = C.tx2; ctx.font = '11px sans-serif'; ctx.textAlign = 'left';
+    var hn = h.host.length > 18 ? h.host.slice(0, 17) + '…' : h.host;
+    ctx.fillText('▣ ' + hn, h.x + 8, h.y + h.h / 2);
+    nodes.push({ x: h.x, y: h.y, w: h.w, h: h.h, kind: 'host', host: h.host,
+                 group: h.group, wx: h.x, wy: h.y });
+    // 主干母线：host 底部引出 → 卡片左侧主干 → 各实例左缘水平接入（连线不穿越节点）
+    var instPs = insts.map(function(n){ return L.instPos[n.id]; }).filter(Boolean);
+    if (instPs.length){
+      var hstB = stOf(insts);
+      var colB = statusColor(hstB);
+      var minCardX = Math.min(h.x, Math.min.apply(null, instPs.map(function(p){ return p.x; })));
+      var trunkX = minCardX - 9;
+      var x1 = h.x + 10, y1 = h.y + h.h, elbowY = y1 + 6;
+      var yEnd = instPs[instPs.length - 1].y + instH / 2;
+      ctx.strokeStyle = colB; ctx.lineWidth = 1;
+      if (hstB === 'down') ctx.setLineDash([4, 4]);
+      ctx.globalAlpha = .5;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1); ctx.lineTo(x1, elbowY); ctx.lineTo(trunkX, elbowY); ctx.lineTo(trunkX, yEnd);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      instPs.forEach(function(p, i){
+        var my = p.y + instH / 2;
+        ctx.strokeStyle = statusColor(insts[i].status);
+        ctx.beginPath(); ctx.moveTo(trunkX, my); ctx.lineTo(p.x, my); ctx.stroke();
+        if (hstB !== 'down'){
+          // 主干流动光点（相位错开，体现采集方向）
+          var t = (flowT * .5 + i * .3) % 1;
+          ctx.fillStyle = statusColor(insts[i].status); ctx.globalAlpha = 1;
+          ctx.beginPath(); ctx.arc(trunkX, elbowY + (yEnd - elbowY) * t, 1.8, 0, 6.3); ctx.fill();
+          ctx.globalAlpha = .5;
+        }
+      });
+      ctx.globalAlpha = 1;
+    }
+    // 实例节点（多行卡片：指标直接内联展示，无需悬停）
+    insts.forEach(drawInstCard);
+  });
+  ctx.restore();
+
+  /* 实例多行卡片（layout 与 fold 分支共用） */
+  function drawInstCard(n){
+      var p = L.instPos[n.id]; if (!p) return;
+      var col = statusColor(n.status);
+      var tm = typeMeta(n.db_type);
+      ctx.fillStyle = n.status === 'down' ? '#141B29' : '#152238';
+      ctx.strokeStyle = col; ctx.lineWidth = 1;
+      rr(p.x, p.y, instW, instH, 6); ctx.fill(); ctx.stroke();
+      // 第1行：状态灯 + 类型章 + 名称
+      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(p.x + 12, p.y + 15, 3.5, 0, 6.3); ctx.fill();
+      ctx.fillStyle = tm[1]; roundLabel(p.x + 20, p.y + 8, 24, 14, tm[0]);
+      ctx.fillStyle = C.tx; ctx.font = '11px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      var nm = n.name.length > 13 ? n.name.slice(0, 12) + '…' : n.name;
+      ctx.fillText(nm, p.x + 50, p.y + 15);
+      // 第2行：状态 + 连接数
+      var stx = { ok: S.st_ok, warn: S.st_warn, crit: S.st_crit, down: S.st_down }[n.status];
+      ctx.font = '10px sans-serif';
+      ctx.fillStyle = C.tx2; ctx.fillText(S.node_status, p.x + 12, p.y + 35);
+      ctx.fillStyle = col;   ctx.fillText(stx, p.x + 34, p.y + 35);
+      ctx.fillStyle = C.tx2; ctx.fillText(S.node_conn + ' ' + (n.conn ? n.conn.total + '/' + n.conn.max_conn : '–'), p.x + 64, p.y + 35);
+      // 第3行：QPS / TPS / 慢查询
+      ctx.fillStyle = C.tx2;
+      ctx.fillText('QPS ' + fmt(n.qps), p.x + 12, p.y + 52);
+      ctx.fillText('TPS ' + fmt(n.tps), p.x + 82, p.y + 52);
+      ctx.fillText(S.node_slowq + ' ' + fmt(n.slowq), p.x + 152, p.y + 52);
+      // 第4行：错误 > 表空间/复制延迟 > 地址（按信息优先级展示其一）
+      if (n.err){
+        ctx.fillStyle = C.crit;
+        ctx.fillText(String(n.err).slice(0, 24), p.x + 12, p.y + 68);
+      } else {
+        var extra = null, exC = C.warn;
+        if (n.tbs_free_pct !== null && n.tbs_free_pct !== undefined) extra = S.node_tbs + ' ' + n.tbs_free_pct + '%';
+        else if (n.repl_lag_s !== null && n.repl_lag_s !== undefined) extra = S.node_repl + ' ' + n.repl_lag_s + 's';
+        else if (n.stat_hint) { extra = (n.stat_hint === 'view_server_state' ? S.hint_vss : S.hint_stat); exC = C.tx2; }
+        ctx.fillStyle = extra ? exC : C.tx2;
+        ctx.fillText(extra || (n.host + ':' + n.port), p.x + 12, p.y + 68);
+      }
+      // 连接利用率条（节点底边）
+      var cu = n.conn ? (n.conn.usage_pct || 0) : 0;
+      if (cu > 0){
+        ctx.fillStyle = cu >= 95 ? C.crit : cu >= 80 ? C.warn : C.accent;
+        ctx.globalAlpha = .85;
+        ctx.fillRect(p.x + 2, p.y + instH - 3, (instW - 4) * Math.min(cu, 100) / 100, 2);
+        ctx.globalAlpha = 1;
+      }
+      nodes.push({ x: p.x, y: p.y, w: instW, h: instH, kind: 'inst', data: n, wx: p.x, wy: p.y });
+  }
+
+  function stOf(insts){
+    if (insts.some(function(n){ return n.status === 'down' || n.status === 'crit'; })) return 'crit';
+    if (insts.some(function(n){ return n.status === 'warn'; })) return 'warn';
+    return 'ok';
+  }
+}
+function roundLabel(x, y, w, h, txt){
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, 4);
+  ctx.globalAlpha = .22; ctx.fill(); ctx.globalAlpha = 1;
+  ctx.fillStyle = C.tx; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText(txt, x + w / 2, y + h / 2 + .5);
+}
+
+/* 帧循环：flowT 推进 + 重绘 */
+function frame(){
+  flowT += 0.016;
+  drawTopo();
+  requestAnimationFrame(frame);
+}
+
+/* ── 拓扑交互 ── */
+topo.addEventListener('wheel', function(e){
+  e.preventDefault();
+  var r = topo.getBoundingClientRect();
+  var mx = e.clientX - r.left, my = e.clientY - r.top;
+  var f = e.deltaY < 0 ? 1.1 : 0.9;
+  var ns = Math.max(.3, Math.min(3, view.scale * f));
+  view.ox = mx - (mx - view.ox) * ns / view.scale;
+  view.oy = my - (my - view.oy) * ns / view.scale;
+  view.scale = ns;
+}, { passive: false });
+topo.addEventListener('mousedown', function(e){
+  view.drag = true; view.dx = e.clientX - view.ox; view.dy = e.clientY - view.oy;
+  view.moved = false; topo.classList.add('dragging');
+});
+window.addEventListener('mouseup', function(){ view.drag = false; topo.classList.remove('dragging'); });
+window.addEventListener('mousemove', function(e){
+  if (view.drag){
+    var nx = e.clientX - view.dx, ny = e.clientY - view.dy;
+    if (Math.abs(nx - view.ox) + Math.abs(ny - view.oy) > 3) view.moved = true;
+    view.ox = nx; view.oy = ny;
+  }
+});
+topo.addEventListener('mousemove', function(e){
+  if (view.drag) return;
+  var r = topo.getBoundingClientRect();
+  var mx = e.clientX - r.left, my = e.clientY - r.top;
+  var hit = hitTest(mx, my);
+  var tip = document.getElementById('tip');
+  // 实例指标已内联到节点卡片，仅折叠机柜节点保留悬停提示
+  if (hit && hit.kind === 'fold'){
+    tip.innerHTML = '<b>▤ ' + hit.group + '</b>（' + S.fold_tip + '）<br>' +
+      '<span class="muted">' + S.total_n + ' ' + hit.total + ' ' + S.n_hosts + ' · </span>' +
+      '<span style="color:' + C.ok + '">' + S.st_ok + ' ' + hit.counts[0] + '</span> ' +
+      '<span style="color:' + C.warn + '">' + S.st_warn + ' ' + hit.counts[1] + '</span> ' +
+      '<span style="color:' + C.crit + '">' + S.st_crit + ' ' + hit.counts[2] + '</span>';
+    tip.style.display = 'block';
+    tip.style.left = Math.min(mx + 16, r.width - 330) + 'px';
+    tip.style.top = (my + 12) + 'px';
+  } else { tip.style.display = 'none'; }
+});
+topo.addEventListener('mouseleave', function(){ document.getElementById('tip').style.display = 'none'; });
+topo.addEventListener('click', function(e){
+  if (view.moved) return;
+  var r = topo.getBoundingClientRect();
+  var hit = hitTest(e.clientX - r.left, e.clientY - r.top);
+  if (!hit) return;
+  if (hit.kind === 'fold'){
+    foldedGroups[hit.group] = !(foldedGroups[hit.group] !== undefined ? foldedGroups[hit.group] : true);
+    return;
+  }
+  if (hit.kind === 'inst'){
+    if (pinnedId === hit.data.id){ closeDetail(); return; }
+    pinnedId = hit.data.id;
+    document.getElementById('detail-body').innerHTML = detailHtml(hit.data);
+    document.getElementById('detail').style.display = 'block';
+  }
+});
+function hitTest(mx, my){
+  mx = (mx - view.ox) / view.scale; my = (my - view.oy) / view.scale;
+  for (var i = nodes.length - 1; i >= 0; i--){
+    var n = nodes[i];
+    if (mx >= n.x && mx <= n.x + n.w && my >= n.y && my <= n.y + n.h) return n;
+  }
+  return null;
+}
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){
+  return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+function detailHtml(n){
+  var st = { ok: S.st_ok, warn: S.st_warn, crit: S.st_crit, down: S.st_down }[n.status];
+  var rows = [
+    [S.d_status, '<span style="color:' + statusColor(n.status) + '">' + st + '</span>'],
+    [S.d_type, esc(n.db_type) + ' / ' + esc(n.group)],
+    [S.d_addr, esc(n.host) + ':' + esc(n.port)],
+    [S.d_conn, n.conn ? n.conn.total + ' / ' + n.conn.max_conn : '–'],
+    [S.d_active, n.conn ? n.conn.active + ' / ' + n.conn.blocked : '–'],
+    [S.d_util, n.conn ? (n.conn.usage_pct || 0) + '%' : '–'],
+    [S.d_qps, fmt(n.qps) + ' / ' + fmt(n.tps)],
+    [S.d_slowq, fmt(n.slowq)],
+    [S.d_locks, fmt(n.lock_waits)],
+    [S.d_repl, n.repl_lag_s !== null && n.repl_lag_s !== undefined ? n.repl_lag_s + 's' : '–'],
+    [S.d_tbs, n.tbs_free_pct !== null && n.tbs_free_pct !== undefined ? n.tbs_free_pct + '%' : '–'],
+    [S.d_cache, fmt(n.cache_hit_pct, '%')],
+  ];
+  var h = '<h4>' + esc(n.name) + '</h4><table>';
+  rows.forEach(function(r){ h += '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>'; });
+  h += '</table>';
+  if (n.stat_hint && !n.err) h += '<div style="color:' + C.tx2 + ';margin-top:6px;font-size:12px">' + esc(n.stat_hint === 'view_server_state' ? S.hint_vss : S.hint_stat) + '</div>';
+  if (n.err) h += '<div style="color:' + C.crit + ';margin-top:6px;font-size:12px">' + esc(n.err).slice(0, 160) + '</div>';
+  return h;
+}
+function closeDetail(){
+  pinnedId = null;
+  document.getElementById('detail').style.display = 'none';
+}
+
+/* ══════════════ 数据轮询与图表刷新 ══════════════ */
+function setKpi(id, v){ document.getElementById(id).textContent = v; }
+
+function refresh(data){
+  var k = data.kpis || {};
+  setKpi('k-online', (k.online || 0) + ' / ' + (k.total || 0));
+  setKpi('k-warn', k.warn || 0);
+  setKpi('k-crit', (k.crit || 0) + (k.down ? ' + ' + k.down : ''));
+  setKpi('k-conn', k.total_conn || 0);
+  setKpi('k-qps', k.total_qps || 0);
+  setKpi('k-tps', k.total_tps || 0);
+
+  var T = data.topn || {};
+  setBar('c-qps', T.qps, C.accent, { unit: '', showBg: true });
+  setBar('c-conn', T.conn_util, C.blue, { unit: '%', markLine: true, colorFn: pctColor, showBg: true, hideX: true, max: 100 });
+  // 连接数 / 活跃会话 Top 10（双系列，按连接数排序，点条开详情）
+  var ct = T.conn_total || [], saMap = {};
+  (T.sess_active || []).forEach(function(d){ saMap[d.name] = d.value; });
+  var ctNames = ct.map(function(d){ return d.name; }).reverse();
+  var ctV = ct.map(function(d){
+    return { value: d.value, iid: d.id, itemStyle: { color: grad(C.blue) }, label: { color: C.blue } };
+  }).reverse();
+  var ctS = ct.map(function(d){
+    return { value: saMap[d.name] || 0, iid: d.id, itemStyle: { color: grad(C.accent) } };
+  }).reverse();
+  var connsOpt = {
+    animation: false,
+    color: [C.blue, C.accent],
+    grid: BASE_GRID,
+    tooltip: Object.assign({ trigger: 'axis', axisPointer: { type: 'shadow',
+        shadowStyle: { color: 'rgba(255,255,255,.04)' } },
+        formatter: function(ps){ var i = ps[0].dataIndex;
+          return esc(ctNames[i]) + '<br>连接数：<b>' + fmt(ctV[i] && ctV[i].value) + '</b>　活跃会话：<b>' + fmt(ctS[i] && ctS[i].value) + '</b>'; } }, TIP_STYLE),
+    legend: { top: 0, right: 4, itemWidth: 10, itemHeight: 8, textStyle: { color: C.tx2, fontSize: 10 } },
+    xAxis: { type: 'value', axisLabel: { color: C.tx2, fontSize: 10 },
+             splitLine: { lineStyle: { color: C.border, type: 'dashed' } } },
+    yAxis: { type: 'category', data: ctNames,
+             axisLabel: { color: C.tx, fontSize: 10.5, width: 104, overflow: 'truncate', interval: 0 },
+             axisLine: { lineStyle: { color: C.border } }, axisTick: { show: false } },
+    series: [
+      { name: '连接数', type: 'bar', data: ctV, barWidth: 5,
+        itemStyle: { borderRadius: [0, 3, 3, 0] },
+        showBackground: true, backgroundStyle: { color: 'rgba(255,255,255,.035)', borderRadius: [0, 3, 3, 0] },
+        label: { show: true, position: 'right', fontSize: 9, formatter: function(p){ return p.value || ''; } } },
+      { name: '活跃会话', type: 'bar', data: ctS, barWidth: 5,
+        itemStyle: { borderRadius: [0, 3, 3, 0] },
+        showBackground: true, backgroundStyle: { color: 'rgba(255,255,255,.035)', borderRadius: [0, 3, 3, 0] } }
+    ]
+  };
+  if (!ct.length){
+    connsOpt.graphic = [{ type: 'text', left: 'center', top: 'middle',
+      style: { text: S.no_data, fill: C.tx2, fontSize: 12 } }];
+    connsOpt.xAxis.show = false; connsOpt.yAxis.show = false;
+  }
+  chart('c-conns').setOption(connsOpt, true);
+  setBar('c-slow', T.slowq, C.warn, { unit: '', showBg: true });
+  /* 表空间：HTML 进度列表（标签完整可读 + 三档等级配色 + 点行下钻实例详情） */
+  (function(){
+    var el = document.getElementById('tbs-list');
+    var arr = T.tbs_worst || [];
+    if (!arr.length){
+      el.innerHTML = '<div class="no-data">' + S.no_data + '</div>';
+      return;
+    }
+    el.innerHTML = arr.map(function(d, i){
+      var c = tbsColor(d.value);
+      return '<div class="trow" data-iid="' + esc(d.id || '') + '" title="' + esc(d.name) + '">' +
+        '<span class="rk' + (i < 3 ? ' top' : '') + '">' + (i + 1) + '</span>' +
+        '<span class="nm">' + esc(d.name) + '</span>' +
+        '<span class="track"><span class="fill" style="width:' + Math.min(d.value, 100) + '%;background:linear-gradient(90deg,' + c + '44,' + c + ')"></span></span>' +
+        '<span class="val" style="color:' + c + '">' + d.value + '%</span></div>';
+    }).join('');
+    Array.prototype.forEach.call(el.querySelectorAll('.trow'), function(row){
+      row.addEventListener('click', function(){ openDetailById(row.getAttribute('data-iid')); });
+    });
+  })();
+  setBar('c-repl', T.repl_lag, C.blue, { unit: 's', showBg: true });
+  setBar('c-lock', T.lock_wait, C.warn, { unit: '', showBg: true });
+
+  var tr = data.trend || [];
+  var trendOpt = {
+    animation: false,
+    grid: BASE_GRID,
+    tooltip: Object.assign({ trigger: 'axis' }, TIP_STYLE),
+    xAxis: { type: 'category', data: tr.map(function(t){
+        var d = new Date(t.ts * 1000);
+        return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2);
+      }), axisLabel: { color: C.tx2, fontSize: 10 }, boundaryGap: false,
+      axisLine: { lineStyle: { color: C.border } } },
+    yAxis: { type: 'value', axisLabel: { color: C.tx2, fontSize: 10 },
+             splitLine: { lineStyle: { color: C.border, type: 'dashed' } },
+             scale: true },
+    series: [{ type: 'line', data: tr.map(function(t){ return t.qps; }), smooth: true,
+      symbol: 'none', lineStyle: { color: C.accent, width: 1.8 },
+      areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+        { offset: 0, color: 'rgba(0,200,160,.32)' },
+        { offset: 1, color: 'rgba(0,200,160,0)' } ]) } }]
+  };
+  if (!tr.length){
+    trendOpt.graphic = [{ type: 'text', left: 'center', top: 'middle',
+      style: { text: S.no_data, fill: C.tx2, fontSize: 12 } }];
+    trendOpt.xAxis.show = false; trendOpt.yAxis.show = false;
+  }
+  chart('c-trend').setOption(trendOpt, true);
+
+  var cnt = { ok: 0, warn: 0, crit: 0, down: 0 };
+  (data.nodes || []).forEach(function(n){ cnt[n.status] = (cnt[n.status] || 0) + 1; });
+  var healthData = [
+    { name: S.st_ok,   value: cnt.ok,   itemStyle: { color: C.ok,   shadowBlur: 8, shadowColor: C.ok + '55' } },
+    { name: S.st_warn, value: cnt.warn, itemStyle: { color: C.warn, shadowBlur: 8, shadowColor: C.warn + '55' } },
+    { name: S.st_crit, value: cnt.crit, itemStyle: { color: C.crit, shadowBlur: 8, shadowColor: C.crit + '55' } },
+    { name: S.st_down, value: cnt.down, itemStyle: { color: C.down, shadowBlur: 8, shadowColor: C.down + '55' } }
+  ].filter(function(d){ return d.value > 0; });
+  var hTotal = cnt.ok + cnt.warn + cnt.crit + cnt.down;
+  var healthOpt = {
+    animation: false,
+    tooltip: Object.assign({ trigger: 'item',
+      formatter: function(p){ return p.name + '：<b>' + p.value + '</b>（' + p.percent + '%）'; } }, TIP_STYLE),
+    legend: { orient: 'vertical', right: 8, top: 'middle', icon: 'circle',
+      itemWidth: 8, itemHeight: 8, itemGap: 12,
+      textStyle: { color: C.tx2, fontSize: 11.5 },
+      formatter: function(name){
+        var m = {};
+        healthData.forEach(function(d){ m[d.name] = d.value; });
+        return name + '  ' + (m[name] || 0);
+      } },
+    series: [{ type: 'pie', radius: ['62%', '82%'], center: ['32%', '50%'],
+      avoidLabelOverlap: false, startAngle: 90,
+      itemStyle: { borderColor: C.panel, borderWidth: 3, borderRadius: 6 },
+      emphasis: { scale: true, scaleSize: 5 },
+      label: { show: true, position: 'center',
+        formatter: hTotal + '\n' + S.instances,
+        fontSize: 21, fontWeight: 600, color: C.tx, lineHeight: 26 },
+      labelLine: { show: false },
+      data: healthData }]
+  };
+  if (!healthData.length){
+    healthOpt.graphic = [{ type: 'text', left: 'center', top: 'middle',
+      style: { text: S.no_data, fill: C.tx2, fontSize: 12 } }];
+  }
+  chart('c-health').setOption(healthOpt, true);
+
+  // 告警滚动条
+  var ticker = document.getElementById('ticker');
+  var alerts = data.alerts || [];
+  if (!alerts.length){
+    ticker.innerHTML = '<span class="empty"><span class="probe-dot" style="background:' + C.ok + '"></span>' + S.ticker_empty + ' ' + (k.probe_running ? S.running : S.stopped) + '</span>';
+    ticker.style.transform = 'translateX(0)';
+  } else {
+    var seg = alerts.map(function(a){
+      return '<span class="a-' + a.level + '">[' + (a.level === 'crit' ? S.st_crit : S.st_warn) + '] ' + esc(a.name) + ' — ' + esc(a.msg) + '</span>';
+    }).join('');
+    ticker.innerHTML = seg + seg;  // 双份内容做无缝滚动
+    startTicker();
+  }
+
+  topoData = data.nodes || [];
+}
+
+/* 告警滚动（CSS 变换，每 30ms 推进） */
+var tickerTimer = null, tickerX = 0, tickerW = 0;
+function startTicker(){
+  var el = document.getElementById('ticker');
+  if (tickerW && el.scrollWidth === tickerW) return;
+  if (tickerTimer) { return; }
+  tickerW = el.scrollWidth;
+  tickerTimer = setInterval(function(){
+    var el2 = document.getElementById('ticker');
+    tickerX -= 1;
+    if (tickerW && -tickerX >= tickerW / 2) tickerX = 0;
+    el2.style.transform = 'translateX(' + tickerX + 'px)';
+  }, 40);
+}
+
+function layoutCharts(){
+  Object.keys(charts).forEach(function(k){ charts[k].resize(); });
+}
+
+async function poll(){
+  try {
+    var r = await fetch('/api/dashboard/overview');
+    var data = await r.json();
+    if (data.ok) refresh(data);
+  } catch (e) { /* 网络抖动静默重试 */ }
+}
+
+/* 时钟 */
+setInterval(function(){
+  var d = new Date();
+  document.getElementById('clock').textContent =
+    d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2) + ' ' +
+    ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2);
+}, 1000);
+
+/* 全屏 */
+function toggleFs(){
+  if (document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen();
+}
+
+/* 启动 */
+resizeCanvas();
+frame();
+poll();
+setInterval(poll, 5000);
+setTimeout(layoutCharts, 300);
+</script>
+</body>
+</html>

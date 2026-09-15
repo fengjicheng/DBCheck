@@ -15,11 +15,59 @@
 """
 
 import time
+import os
+import sys
 import threading
 import json
 from collections import deque
 from modules.pro.instance_manager import get_instance_manager
+from modules.core.paths import PROJECT_ROOT
 import modules.monitor.queries as mq
+from modules.monitor.screen_metrics import SCREEN_SQLS
+
+
+# ── JDBC 批量采集通道 ─────────────────────────────────────────
+# gbase / db2 / clickhouse 无 python 原生驱动（或驱动不可用），统一走
+# 「独立非 gevent 子进程 + JDBC」通道：主进程绝不 startJVM（否则 JPype/JVM
+# 与 gevent hub 死锁，整个 Web UI 冻结）。每轮每实例只 spawn 一次子进程，
+# 一次跑完该实例全部采集 SQL（连接/慢查/性能计数/容量），结果缓存供本轮复用。
+JDBC_BATCH_DB_TYPES = frozenset(('gbase', 'db2', 'clickhouse'))
+JDBC_BATCH_TTL = 12.0        # 批量结果缓存时长（s），略短于采样间隔 15s
+JDBC_BATCH_TIMEOUT = 90      # 子进程硬超时（含 JVM 冷启动 4~10s）
+
+
+# ── 驱动异常 → 友好提示 ──────────────────────────────────────
+# 驱动原始异常（如 "<class 'dmPython.Connection'> returned a result with
+# an exception set"）对用户无意义，按常见根因归类成可操作的提示；
+# 完整异常始终由调用方写入服务端日志，此处只负责面向用户的文案。
+_ERROR_PATTERNS = [
+    (('returned a result with an exception set',),
+     '连接失败，请检查地址、端口、用户名密码及登录配置'),
+    (('connection refused', '拒绝连接', '10061', 'cannot connect'),
+     '无法连接数据库主机（数据库未启动或端口不通）'),
+    (('timed out', 'timeout', '超时'),
+     '连接超时（网络不通或防火墙拦截）'),
+    (('getaddrinfo failed', 'name or service not known', 'unknown host',
+      'nodename nor servname'),
+     '主机地址无法解析，请检查地址配置'),
+    (('access denied', 'authentication', 'login failed', 'ora-01017',
+      'invalid username', 'password authentication', '密码'),
+     '用户名或密码错误'),
+    (('unknown database', 'database does not exist', 'database "',
+      'specified database'),  # psycopg2: database "xxx" does not exist（库名夹在引号内）
+     '数据库/服务名不存在，请检查库名配置'),
+    (('ssl', 'certificate'),
+     'SSL/证书校验失败'),
+]
+
+
+def _friendly_db_error(e):
+    """把驱动异常翻译成用户可读的提示；未命中已知模式时给通用提示。"""
+    low = str(e).lower()
+    for keys, msg in _ERROR_PATTERNS:
+        if any(k in low for k in keys):
+            return msg
+    return '数据库连接或查询异常，请检查实例配置或查看服务端日志'
 
 
 class MonitorEngine:
@@ -43,6 +91,8 @@ class MonitorEngine:
         self._conn_history = deque(maxlen=self.MAX_HISTORY)
         # 最后一次采集时间
         self._last_collect_ts = 0
+        # JDBC 批量采集缓存: {iid: {'ts': float, 'res': {sql: rows|('__err__',msg)}, 'lock': Lock}}
+        self._jdbc_cache = {}
 
     # ═══════════════════════════════════════════════════════════
     #  启停控制
@@ -153,7 +203,7 @@ class MonitorEngine:
                 if not inst.get('host'):
                     print(f"[Monitor] 跳过空 host 实例: {iid}", flush=True)
                     continue
-                db_type = inst.get('db_type', '').lower()
+                db_type = mq.normalize_db_type(inst.get('db_type', ''))
                 label = f"{inst.get('name', iid)} ({inst.get('host', '?')}:{inst.get('port', '?')})"
 
                 # 慢查询
@@ -163,7 +213,7 @@ class MonitorEngine:
                 except Exception as e:
                     print(f"[Monitor] 慢查询采集失败 {label}: {e}", flush=True)
                     new_slow[iid] = {
-                        'data': [], 'error': str(e),
+                        'data': [], 'error': _friendly_db_error(e),
                         'ts': time.time(), 'db_type': db_type, 'label': label,
                     }
 
@@ -181,7 +231,7 @@ class MonitorEngine:
                 except Exception as e:
                     print(f"[Monitor] 连接采集失败 {label}: {e}", flush=True)
                     new_conn[iid] = {
-                        'data': [], 'error': str(e),
+                        'data': [], 'error': _friendly_db_error(e),
                         'ts': time.time(), 'total': 0, 'max_conn': 0,
                         'db_type': db_type, 'label': label,
                     }
@@ -211,6 +261,7 @@ class MonitorEngine:
         try:
             rows = self._connect_and_query(instance_id, sql)
         except Exception as e:
+            print(f"[Monitor] 慢查询 SQL 失败 {label}: {e}", flush=True)
             # 尝试 fallback SQL
             fallback_sql = mq.SLOW_QUERY_FALLBACK_TEMPLATES.get(db_type)
             if fallback_sql:
@@ -218,10 +269,11 @@ class MonitorEngine:
                     rows = self._connect_and_query(instance_id, fallback_sql)
                     print(f"[Monitor] {label} 使用 fallback 慢查询 SQL", flush=True)
                 except Exception as fb:
-                    return {'data': [], 'error': f'SQL失败: {fb}',
+                    print(f"[Monitor] 慢查询 fallback 亦失败 {label}: {fb}", flush=True)
+                    return {'data': [], 'error': _friendly_db_error(fb),
                             'ts': time.time(), 'db_type': db_type, 'label': label}
             else:
-                return {'data': [], 'error': f'SQL失败: {e}',
+                return {'data': [], 'error': _friendly_db_error(e),
                         'ts': time.time(), 'db_type': db_type, 'label': label}
 
         result = {
@@ -245,7 +297,7 @@ class MonitorEngine:
             rows = self._connect_and_query(instance_id, conn_sql)
         except Exception as e:
             print(f"[Monitor] 连接 SQL 失败 {label}: {e}", flush=True)
-            return {'data': [], 'error': f'连接SQL失败: {e}',
+            return {'data': [], 'error': _friendly_db_error(e),
                     'ts': time.time(), 'total': 0, 'max_conn': mq.MAX_CONNECTION_DEFAULTS.get(db_type, 100),
                     'connections': {'active': 0, 'idle': 0, 'blocked': 0}, 'usage_pct': 0,
                     'db_type': db_type, 'label': label}
@@ -297,8 +349,165 @@ class MonitorEngine:
         return result
 
     # ═══════════════════════════════════════════════════════════
+    #  JDBC 批量子进程采集（gbase / db2 / clickhouse）
+    # ═══════════════════════════════════════════════════════════
+
+    @staticmethod
+    def _jdbc_batch_sqls(db_type):
+        """该类型一轮采集所需的全部 SQL（模板去重，主/备选全带上）。"""
+        sqls, seen = [], set()
+
+        def _add(s):
+            if s and s not in seen:
+                seen.add(s)
+                sqls.append(s)
+
+        for src in (mq.CONNECTION_TEMPLATES, mq.MAX_CONN_QUERY_SQL,
+                    mq.SLOW_QUERY_TEMPLATES, mq.SLOW_QUERY_FALLBACK_TEMPLATES):
+            _add(src.get(db_type))
+        # 大屏指标 SQL：family 条目为 {key: sql}，逐条带上（repl/repl8 同理）
+        fam_sqls = SCREEN_SQLS.get(db_type) or {}
+        for s in fam_sqls.values():
+            _add(s)
+        return sqls
+
+    def _jdbc_query(self, inst, db_type, sql, timeout=None):
+        """JDBC 批量通道查询单条 SQL：结果来自每轮一次的子进程批量采集缓存。
+
+        首个调用方（引擎采集线程或大屏采样线程）触发一次子进程批量执行，
+        同轮内其余查询（含另一侧线程的 run_query）直接读缓存，避免每条 SQL
+        都冷启动一次 JVM（4~10s）。inst 为已解密实例 dict。
+        """
+        instance_id = inst.get('id')
+        cache = self._jdbc_cache.get(instance_id)
+        if cache and time.time() - cache['ts'] <= JDBC_BATCH_TTL:
+            return self._jdbc_pick(cache['res'], sql)
+
+        lock = cache['lock'] if cache else threading.Lock()
+        with lock:
+            cache = self._jdbc_cache.get(instance_id)
+            if cache and time.time() - cache['ts'] <= JDBC_BATCH_TTL:
+                return self._jdbc_pick(cache['res'], sql)
+            res = self._jdbc_run_batch(inst, db_type, timeout)
+            self._jdbc_cache[instance_id] = {'ts': time.time(), 'res': res,
+                                             'lock': lock}
+            return self._jdbc_pick(res, sql)
+
+    @staticmethod
+    def _jdbc_pick(res, sql):
+        """从批量结果中取单条 SQL 的行；错误标记转成异常（沿用友好文案链路）。"""
+        entry = res.get(sql)
+        if entry is None:
+            raise RuntimeError('该类型批量采集未覆盖此 SQL: %s' % sql[:60])
+        if isinstance(entry, tuple):
+            raise RuntimeError(entry[1])
+        return entry
+
+    def _jdbc_run_batch(self, inst, db_type, timeout=None):
+        """spawn 隔离子进程，一次跑完该实例本轮全部采集 SQL。
+
+        参数经 stdin 临时文件传入（密码不进进程列表），结果取 stdout 中
+        最后一个以 { 开头的行（与 jdbc_test_cli / jdbc_metrics_cli 同源约定）。
+        """
+        import subprocess as _sp
+        import tempfile as _tf
+
+        if getattr(sys, 'frozen', False):
+            cmd = [sys.executable, '--jdbc-collect-cli']
+        else:
+            cmd = [sys.executable, os.path.join(
+                str(PROJECT_ROOT), 'modules', 'monitor', 'jdbc_collect_cli.py')]
+
+        sqls = self._jdbc_batch_sqls(db_type)
+        payload = {
+            'db_type': db_type,
+            'host': inst.get('host'),
+            'port': inst.get('port'),
+            'user': inst.get('user') or '',
+            'password': inst.get('password') or '',
+            'database': inst.get('database') or inst.get('service_name') or '',
+            'jdbc_url': inst.get('jdbc_url') or '',
+            'ssl': bool(inst.get('ssl', False)),
+            'driver_version': inst.get('driver_version') or '',
+            'gbase_server_name': inst.get('gbase_server_name') or '',
+            'queries': sqls,
+        }
+
+        _in_fd, _in_path = _tf.mkstemp(prefix='dbc_mjdbc_in_', suffix='.json')
+        _out_fd, _out_path = _tf.mkstemp(prefix='dbc_mjdbc_out_', suffix='.log')
+        os.close(_out_fd)
+        try:
+            with os.fdopen(_in_fd, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, ensure_ascii=True)
+
+            env = os.environ.copy()
+            env['DBCheck_NO_GEVENT_PATCH'] = '1'   # 子进程绝不能被 monkey-patch
+            env['PYTHONIOENCODING'] = 'utf-8'
+
+            kw = {}
+            if os.name == 'nt':
+                kw['creationflags'] = (getattr(_sp, 'CREATE_NO_WINDOW', 0x08000000)
+                                       | getattr(_sp, 'CREATE_NEW_PROCESS_GROUP', 0x00000200))
+            else:
+                kw['start_new_session'] = True
+
+            with open(_in_path, 'r', encoding='utf-8') as fin, \
+                    open(_out_path, 'w', encoding='utf-8', errors='replace') as fout:
+                proc = _sp.Popen(cmd, stdin=fin, stdout=fout, stderr=_sp.STDOUT,
+                                 env=env, cwd=str(PROJECT_ROOT), **kw)
+                try:
+                    rc = proc.wait(timeout=timeout or JDBC_BATCH_TIMEOUT)
+                except _sp.TimeoutExpired:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                    raise RuntimeError('JDBC 采集子进程超时（%ds）'
+                                       % (timeout or JDBC_BATCH_TIMEOUT))
+
+            # 解析输出：最后一个以 { 开头的行是结构化结果
+            result = None
+            with open(_out_path, 'r', encoding='utf-8', errors='replace') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('{'):
+                        result = line
+            if result is None:
+                # 附带子进程输出尾部，便于定位 spawn/导入失败的真实原因
+                with open(_out_path, 'r', encoding='utf-8', errors='replace') as f:
+                    _tail = f.read()[-400:]
+                raise RuntimeError('JDBC 采集子进程无结果输出（exit=%s）: %s'
+                                   % (rc, _tail.replace('\n', ' | ')))
+            try:
+                data = json.loads(result)
+            except Exception as e:
+                raise RuntimeError('JDBC 采集子进程输出解析失败: %s' % e)
+
+            fatal = (data or {}).get('fatal')
+            res = {}
+            for i, s in enumerate(sqls):
+                entry = (data or {}).get('q%d' % i)
+                if fatal:
+                    res[s] = ('__err__', fatal)
+                elif entry is None or entry.get('error'):
+                    res[s] = ('__err__', (entry or {}).get('error') or '采集失败')
+                else:
+                    res[s] = entry.get('rows') or []
+            return res
+        finally:
+            for p in (_in_path, _out_path):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+
+    # ═══════════════════════════════════════════════════════════
     #  通用连接+查询
     # ═══════════════════════════════════════════════════════════
+
+    def run_query(self, instance_id, sql, timeout=None):
+        """公共查询入口：供大屏指标适配层（screen_metrics）等外部复用连接逻辑。"""
+        return self._connect_and_query(instance_id, sql, timeout=timeout)
 
     def _connect_and_query(self, instance_id, sql, timeout=None):
         """连接到指定数据源并执行 SQL，返回 list of dicts"""
@@ -310,7 +519,15 @@ class MonitorEngine:
         if not inst:
             raise ValueError(f"实例 {instance_id} 不存在")
 
-        db_type = inst['db_type'].lower()
+        # 归一到模板键（oracle_jdbc→oracle、tdsqlc_mysql→mysql 等）再分派：
+        # _create_connection 的 python 驱动分支按协议族分派（TDSQL-C 兼容 MySQL
+        # 协议、oracle_jdbc 实例字段与 oracle 相同），与 jdbc 插件 id 无关。
+        db_type = mq.normalize_db_type(inst['db_type'])
+
+        # gbase/db2/clickhouse：JDBC 批量子进程通道（主进程绝不起 JVM）
+        if db_type in JDBC_BATCH_DB_TYPES:
+            return self._jdbc_query(inst, db_type, sql, timeout=timeout)
+
         password = inst['password']
         conn = None
         cursor = None
@@ -331,7 +548,9 @@ class MonitorEngine:
                             val = str(val)
                         except Exception:
                             val = None
-                    row_dict[col] = val
+                    # 列名统一小写：dmPython/oracledb 等驱动返回大写标识符，
+                    # 下游消费者（screen_metrics/前端模板）一律按小写键取值
+                    row_dict[col.lower() if isinstance(col, str) else col] = val
                 rows.append(row_dict)
             return rows
         finally:
@@ -369,11 +588,20 @@ class MonitorEngine:
                 charset='utf8mb4', connect_timeout=timeout, read_timeout=timeout,
             )
 
-        elif db_type in ('postgresql', 'pg'):
+        elif db_type in ('postgresql', 'pg', 'hgdb', 'kingbase', 'uxdb', 'vastbase'):
+            # 国产 PG 系（瀚高/人大金仓/优炫/Vastbase）走 PG 线协议，psycopg2 直连。
+            # ⚠️ 本分支收到的是归一后 db_type（hgdb/kingbase 等已归一为 pg），
+            # default_db 映射必须用实例的原始 db_type 查，否则键全部落空、
+            # 库名空缺时一律回落 postgres（瀚高无 postgres 库 → FATAL 报错）。
+            # 兜底回落「用户名同名库」（PG 惯例：默认库与用户同名，与 JDBC
+            # 数据源测试不指定库名时同口径）。
+            raw_type = (inst.get('db_type') or '').lower()
+            default_db = {'hgdb': 'highgo', 'kingbase': 'kingbase',
+                          'uxdb': 'uxdb', 'vastbase': 'vastbase'}.get(raw_type)
             import psycopg2
             return psycopg2.connect(
                 host=host, port=port, user=user, password=password,
-                dbname=inst.get('database') or 'postgres',
+                dbname=inst.get('database') or default_db or user,
                 client_encoding='UTF8', connect_timeout=timeout,
             )
 
@@ -394,15 +622,36 @@ class MonitorEngine:
             mode = oracledb.SYSDBA if inst.get('sysdba') else oracledb.AUTH_MODE_DEFAULT
             return oracledb.connect(user=user, password=password, dsn=dsn, mode=mode)
 
-        elif db_type == 'sqlserver':
+        elif db_type in ('sqlserver', 'sqlserver_jdbc', 'mssql'):
+            # sqlserver_jdbc（插件标识）与 sqlserver 同为 SQL Server 线协议，
+            # pyodbc/ODBC 直连（绝不走 JDBC 插件——JPype 进程内启动会与 gevent 死锁）。
+            # 驱动分级探测：优先新版 ODBC Driver 17/18（支持 Encrypt），
+            # 其次 Native Client；仅当只剩旧版 DBNETLIB 驱动时去掉加密参数
+            #（它不认识 TrustServerCertificate/Encrypt，会报"无效的连接字符串属性"+SSL 错误）。
             import pyodbc
+            drivers = []
+            try:
+                drivers = [d for d in pyodbc.drivers() if 'sql server' in d.lower()]
+            except Exception:
+                pass
+            modern = [d for d in drivers if 'odbc driver' in d.lower()]
+            native = [d for d in drivers if 'native client' in d.lower()]
+            if modern:
+                driver, legacy = '{%s}' % modern[-1], False
+            elif native:
+                driver, legacy = '{%s}' % native[0], False
+            elif drivers:
+                driver, legacy = '{%s}' % drivers[-1], True
+            else:
+                driver, legacy = '{ODBC Driver 17 for SQL Server}', False
             conn_str = (
-                f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                f"DRIVER={driver};"
                 f"SERVER={host},{port};"
                 f"UID={user};PWD={password};"
-                f"TrustServerCertificate=yes;Encrypt=yes;"
                 f"Connect Timeout={timeout};"
             )
+            if not legacy:
+                conn_str += "TrustServerCertificate=yes;Encrypt=yes;"
             if inst.get('database'):
                 conn_str += f"Database={inst['database']};"
             return pyodbc.connect(conn_str)
