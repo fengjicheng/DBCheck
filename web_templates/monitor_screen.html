@@ -195,9 +195,79 @@ var TYPE_META = {
   mysql:['My','#0891B2'], mariadb:['Ma','#0E7490'], oceanbase:['OB','#2563EB'], tidb:['Ti','#DC2626'],
   postgresql:['Pg','#4F46E5'], pg:['Pg','#4F46E5'], ivorysql:['IV','#7C3AED'], kingbase:['KB','#6366F1'],
   hgdb:['HG','#0EA5E9'], oracle:['Or','#E11D48'], sqlserver:['MS','#9333EA'], dm:['DM','#D97706'],
-  mongodb:['Mg','#16A34A']
+  mongodb:['Mg','#16A34A'], redis:['Rd','#0D9488'], 'redis-cluster':['RC','#0D9488'],
+  gbase:['GB','#0891B2'], db2:['DB2','#DB2777'], clickhouse:['CH','#F97316']
 };
-function typeMeta(t){ return TYPE_META[(t||'').toLowerCase()] || ['DB', '#5F5E5A']; }
+/* 前端类型键归一：sqlserver_jdbc/db2_jdbc 等 *_jdbc 插件类型回落到基础类型，
+   保证图标 / 类型色 / logo 不会因为带 _jdbc 后缀而掉进兜底（与后端 normalize_db_type 同思路）。 */
+function dbKey(t){
+  var k = (t || '').toLowerCase();
+  if (k.slice(-5) === '_jdbc'){
+    var s = k.slice(0, -5);
+    if (DB_LOGO[s] || DB_ICON[s] || TYPE_META[s]) return s;
+  }
+  return k;
+}
+function typeMeta(t){ var k = dbKey(t); return TYPE_META[k] || ['DB', '#5F5E5A']; }
+/* 数据库类型图标（emoji 字形，canvas 直接绘制，跨类型一眼可辨；无对应图标回退通用库图标） */
+var DB_ICON = {
+  mysql:'🐬', mariadb:'🐬', oceanbase:'🌊', tidb:'🌿',
+  postgresql:'🐘', pg:'🐘', ivorysql:'🐘', kingbase:'🐘', hgdb:'🐘',
+  oracle:'🟠', sqlserver:'🪟', dm:'🐉',
+  mongodb:'🍃', redis:'🔴', 'redis-cluster':'🔴',
+  gbase:'🗄️', db2:'🐝', clickhouse:'🐭'
+};
+function dbIcon(t){ return DB_ICON[dbKey(t)] || '🗄️'; }
+/* 数据库真实 logo：assets/web 下按类型命名的 PNG，经 Flask static_url_path='/' 以根路径提供。
+   同系类型复用同一 logo（mariadb / tdsqlc_mysql → mysql，redis-cluster → redis，
+   postgresql → pg，oracle_jdbc → oracle）。未收录或加载失败的类型回退 DB_ICON emoji。 */
+var DB_LOGO = {
+  mysql:'/mysql.png', mariadb:'/mysql.png', tdsqlc_mysql:'/mysql.png', percona:'/mysql.png',
+  pg:'/pg.png', postgresql:'/pg.png', ivorysql:'/ivorysql.png', kingbase:'/kingbase.png',
+  hgdb:'/hgdb.png', uxdb:'/uxdb.png', yashandb:'/yashandb.png',
+  oracle:'/oracle.png', sqlserver:'/sqlserver.png', sqlserver_jdbc:'/sqlserver.png',
+  dm:'/dm.png', dm8:'/dm.png', vastbase:'/pg.png',
+  gbase:'/gbase.png', gbase8s:'/gbase.png', oceanbase:'/oceanbase.png',
+  db2:'/db2.png', tidb:'/tidb.png', clickhouse:'/clickhouse.png',
+  mongodb:'/mongodb.png', redis:'/redis.png', 'redis-cluster':'/redis.png'
+};
+var LOGO_IMG = {};                      // path -> HTMLImageElement；加载失败记 true（不再重试）
+function dbLogoPath(t){ return DB_LOGO[dbKey(t)] || null; }
+function loadDBLogos(){
+  Object.keys(DB_LOGO).forEach(function(k){
+    var path = DB_LOGO[k];
+    if (LOGO_IMG[path]) return;
+    var img = new Image();
+    img.onload = function(){ LOGO_IMG[path] = img; };
+    img.onerror = function(){ LOGO_IMG[path] = true; };
+    img.src = path;
+  });
+}
+function dbLogoImg(t){
+  var p = dbLogoPath(t);
+  return (p && LOGO_IMG[p] && LOGO_IMG[p] !== true) ? LOGO_IMG[p] : null;
+}
+/* logo 白底章：宽度按 logo 长宽比自适应（1:1 图标 20px，横排字标最多 34px），
+   章内按 contain 缩放居中，避免把 kingbase/hgdb 这类横向字标压扁变形。 */
+function logoChipW(img){
+  var iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+  if (!iw || !ih) return 20;
+  return Math.max(20, Math.min(34, Math.round(14 * (iw / ih)) + 4));
+}
+function drawLogoContain(img, bx, by, bw, bh){
+  var iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+  if (!iw || !ih) return;
+  var s = Math.min(bw / iw, bh / ih), dw = iw * s, dh = ih * s;
+  ctx.drawImage(img, bx + (bw - dw) / 2, by + (bh - dh) / 2, dw, dh);
+}
+/* HTML 场景（详情面板）用：真实 logo + onerror 回退 emoji，保证任何类型都有图标 */
+function dbLogoHtml(t){
+  var p = dbLogoPath(t), emo = dbIcon(t);
+  if (!p) return '<span style="font-size:13px">' + emo + '</span>';
+  return '<img src="' + p + '" alt="" style="width:14px;height:14px;object-fit:contain;vertical-align:-2px" ' +
+         'onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'inline\'">' +
+         '<span style="display:none;font-size:13px">' + emo + '</span>';
+}
 function fmt(n, unit){ return (n === null || n === undefined) ? '–' : n + (unit || ''); }
 function openDetailById(iid){
   if (!iid) return;
@@ -302,7 +372,7 @@ function statusColor(s){
 }
 
 /* 布局几何常量（layout 与 drawTopo 共用）；instH=82 为含内联指标的多行卡片 */
-var instW = 210, instH = 82, hostH = 26, vGap = 10, hostColGap = 24;
+var instW = 210, instH = 82, hostH = 34, vGap = 10, hostColGap = 24;
 
 /* ── 分页常量：实例数超阈值时按页排版（报警组优先靠前，页内最多 3 列） ── */
 var PAGE_THRESHOLD = 36, PAGE_COLS = 3, PAGE_COL_BUDGET = 800;
@@ -389,7 +459,9 @@ function layout(data){
       } else {
         var colH = [y0 + 46, y0 + 46];
         var colX = [cx, cx + instW + hostColGap];
-        var colYs = [[], []];
+        /* 单主干母线的「分支停靠点」：主机 + 其下每张实例卡（y + 状态），
+           主干恒为主题色，分支短线按节点状态着色（故障只红支线，不整条主干变红） */
+        var colStops = [[], []];
         var rowsUsed = 0;
         gHosts.forEach(function(h, hi){
           var col = colH[0] <= colH[1] ? 0 : 1;
@@ -397,14 +469,15 @@ function layout(data){
           var n = h.insts.length;
           hostCol[h.group + '\u0001' + h.host] = { x: hx, y: hy, w: instW, h: hostH,
                                                    host: h.host, group: h.group };
-          colYs[col].push(hy + hostH / 2);
+          colStops[col].push({ y: hy + hostH / 2, st: null });   // 主机节点 → 主干色
           h.insts.forEach(function(nod, ii){
             instPos[nod.id] = { x: hx, y: hy + hostH + 6 + ii * (instH + vGap) };
+            colStops[col].push({ y: hy + hostH + 6 + ii * (instH + vGap) + instH / 2, st: nod.status });
           });
           colH[col] = hy + hostH + 6 + n * (instH + vGap) + 16;
           rowsUsed = Math.max(rowsUsed, Math.max(colH[0], colH[1]));
         });
-        colYs.forEach(function(ys, ci){ if (ys.length) colTrunks.push({ x: colX[ci] - 12, ys: ys }); });
+        colStops.forEach(function(stops, ci){ if (stops.length) colTrunks.push({ x: colX[ci] - 14, stops: stops }); });
         maxRowsPerCol = Math.max(maxRowsPerCol, (rowsUsed - y0) / (instH + vGap));
         cx += (instW + hostColGap) * 2 + GAP + 12;
       }
@@ -443,7 +516,7 @@ function layout(data){
     var colW = instW + hostColGap;
     page.forEach(function(col, ci){
       var yy = y0 + 46;
-      var ys = [];
+      var stops = [];
       col.forEach(function(it){
         var b = it.block;
         if (b.fold){
@@ -454,14 +527,15 @@ function layout(data){
         } else {
           hostCol[b.group + '\u0001' + b.host] = { x: x0 + ci * colW, y: yy, w: instW, h: hostH,
                                                    host: b.host, group: b.group };
-          ys.push(yy + hostH / 2);
+          stops.push({ y: yy + hostH / 2, st: null });   // 主机节点 → 主干色
           b.insts.forEach(function(nod, ii){
             instPos[nod.id] = { x: x0 + ci * colW, y: yy + hostH + 6 + ii * (instH + vGap) };
+            stops.push({ y: yy + hostH + 6 + ii * (instH + vGap) + instH / 2, st: nod.status });
           });
         }
         yy += b.h + 14;
       });
-      if (ys.length) colTrunks.push({ x: x0 + ci * colW - 12, ys: ys });
+      if (stops.length) colTrunks.push({ x: x0 + ci * colW - 14, stops: stops });
       maxRowsPerCol = Math.max(maxRowsPerCol, (yy - y0) / (instH + vGap));
     });
     world.w = Math.max(x0 + PAGE_COLS * colW + 30, 600);
@@ -529,25 +603,35 @@ function drawTopo(){
 
   var probeCX = probe.x + probe.w / 2, probeBY = probe.y + probe.h;
 
-  // 探针 → 列主干：入干曲线走「探针与首行主机」之间的空带，垂直主干沿列左侧给各主机供电（不穿越节点）
+  // 探针 → 列主干：入干曲线走「探针与首行主机」之间的空带，垂直主干沿列左侧给主机与实例卡供电（单主干，不穿越节点）
   // （必须在 probeCX 定义之后绘制，否则坐标为 undefined 导致连线悬空）
   var CHANNEL_Y = 60; // 探针(底 36) 与首行主机(顶 86) 之间的空带
   (L.columnTrunks || []).forEach(function(t, ti){
+    var yEnd = t.stops[t.stops.length - 1].y;
     ctx.strokeStyle = C.accent; ctx.globalAlpha = .5; ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(probeCX, probeBY);
     ctx.bezierCurveTo(probeCX, CHANNEL_Y - 8, t.x, CHANNEL_Y - 8, t.x, CHANNEL_Y);
     ctx.stroke();
-    var yEnd = t.ys[t.ys.length - 1];
+    // 主干竖线恒为主题色（不随实例告警变红）
     ctx.beginPath(); ctx.moveTo(t.x, CHANNEL_Y); ctx.lineTo(t.x, yEnd); ctx.stroke();
-    t.ys.forEach(function(y, i){
-      ctx.beginPath(); ctx.moveTo(t.x, y); ctx.lineTo(t.x + 12, y); ctx.stroke();
-      // 主干流动光点（相位错开）
-      var tt = (flowT * .45 + i * .27 + ti * .13) % 1;
-      ctx.fillStyle = C.accent; ctx.globalAlpha = .9;
-      ctx.beginPath(); ctx.arc(t.x, CHANNEL_Y + (yEnd - CHANNEL_Y) * tt, 1.8, 0, 6.3); ctx.fill();
-      ctx.globalAlpha = .5;
+    // 分支短线：主机 = 主干色；实例 = 各自状态色（故障实例只红自己的支线）
+    t.stops.forEach(function(s){
+      var bad = s.st === 'down' || s.st === 'crit';
+      ctx.strokeStyle = s.st ? statusColor(s.st) : C.accent;
+      ctx.globalAlpha = bad ? .5 + .5 * Math.sin(flowT * 5) : .6;   // 故障支线呼吸闪烁
+      if (s.st === 'down') ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.moveTo(t.x, s.y); ctx.lineTo(t.x + 14, s.y); ctx.stroke();
+      ctx.setLineDash([]);
     });
+    // 主干流动光点：数量封顶 + 全线等间距相位（粒子永不错叠）
+    var np = Math.min(t.stops.length, 6);
+    ctx.fillStyle = C.accent;
+    for (var k = 0; k < np; k++){
+      var tt = (flowT * .4 + k / np + ti * .11) % 1;
+      ctx.globalAlpha = .9;
+      ctx.beginPath(); ctx.arc(t.x, CHANNEL_Y + (yEnd - CHANNEL_Y) * tt, 1.8, 0, 6.3); ctx.fill();
+    }
     ctx.globalAlpha = 1;
   });
 
@@ -575,45 +659,28 @@ function drawTopo(){
       return;
     }
     var insts = topoData.filter(function(n){ return (n.group + '\u0001' + n.host) === hk; });
-    var hst = stOf(insts);
+    // 该主机下实例用到的 SSH 跳板（网关/堡垒机）信息，聚合去重后展示
+    var sshSet = {};
+    insts.forEach(function(n){ if (n.ssh && n.ssh.enabled && n.ssh.host) sshSet[n.ssh.host + ':' + n.ssh.port] = true; });
+    var sshList = Object.keys(sshSet);
     // 服务器节点
     ctx.fillStyle = '#101E36'; ctx.strokeStyle = '#2A3E63'; ctx.lineWidth = 1;
     rr(h.x, h.y, h.w, h.h, 6); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = C.tx2; ctx.font = '11px sans-serif'; ctx.textAlign = 'left';
+    ctx.font = '11px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
     var hn = h.host.length > 18 ? h.host.slice(0, 17) + '…' : h.host;
-    ctx.fillText('▣ ' + hn, h.x + 8, h.y + h.h / 2);
+    if (sshList.length){
+      ctx.fillStyle = C.tx2; ctx.fillText('▣ ' + hn, h.x + 8, h.y + 13);
+      ctx.font = '10px sans-serif'; ctx.fillStyle = C.blue;
+      var sshTxt = '🔐 ' + sshList[0] + (sshList.length > 1 ? ' (+' + (sshList.length - 1) + ')' : '');
+      ctx.fillText(fitText(sshTxt, h.w - 16), h.x + 8, h.y + 27);
+    } else {
+      ctx.fillStyle = C.tx2; ctx.fillText('▣ ' + hn, h.x + 8, h.y + h.h / 2);
+    }
     nodes.push({ x: h.x, y: h.y, w: h.w, h: h.h, kind: 'host', host: h.host,
                  group: h.group, wx: h.x, wy: h.y });
-    // 主干母线：host 底部引出 → 卡片左侧主干 → 各实例左缘水平接入（连线不穿越节点）
-    var instPs = insts.map(function(n){ return L.instPos[n.id]; }).filter(Boolean);
-    if (instPs.length){
-      var hstB = stOf(insts);
-      var colB = statusColor(hstB);
-      var minCardX = Math.min(h.x, Math.min.apply(null, instPs.map(function(p){ return p.x; })));
-      var trunkX = minCardX - 9;
-      var x1 = h.x + 10, y1 = h.y + h.h, elbowY = y1 + 6;
-      var yEnd = instPs[instPs.length - 1].y + instH / 2;
-      ctx.strokeStyle = colB; ctx.lineWidth = 1;
-      if (hstB === 'down') ctx.setLineDash([4, 4]);
-      ctx.globalAlpha = .5;
-      ctx.beginPath();
-      ctx.moveTo(x1, y1); ctx.lineTo(x1, elbowY); ctx.lineTo(trunkX, elbowY); ctx.lineTo(trunkX, yEnd);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      instPs.forEach(function(p, i){
-        var my = p.y + instH / 2;
-        ctx.strokeStyle = statusColor(insts[i].status);
-        ctx.beginPath(); ctx.moveTo(trunkX, my); ctx.lineTo(p.x, my); ctx.stroke();
-        if (hstB !== 'down'){
-          // 主干流动光点（相位错开，体现采集方向）
-          var t = (flowT * .5 + i * .3) % 1;
-          ctx.fillStyle = statusColor(insts[i].status); ctx.globalAlpha = 1;
-          ctx.beginPath(); ctx.arc(trunkX, elbowY + (yEnd - elbowY) * t, 1.8, 0, 6.3); ctx.fill();
-          ctx.globalAlpha = .5;
-        }
-      });
-      ctx.globalAlpha = 1;
-    }
+    /* 主机/实例连线已并入列主干单母线（见上方 columnTrunks 分支绘制）：
+       此处不再另画「主机→实例」第二根竖线——双线仅差 3px 会视觉叠加错位，
+       且旧实现主干取最差实例状态色，一个实例告警会导致整条线变红。 */
     // 实例节点（多行卡片：指标直接内联展示，无需悬停）
     insts.forEach(drawInstCard);
   });
@@ -627,12 +694,44 @@ function drawTopo(){
       ctx.fillStyle = n.status === 'down' ? '#141B29' : '#152238';
       ctx.strokeStyle = col; ctx.lineWidth = 1;
       rr(p.x, p.y, instW, instH, 6); ctx.fill(); ctx.stroke();
-      // 第1行：状态灯 + 类型章 + 名称
+      // 第1行：状态灯 + 数据库真实 logo（白底圆角章，深色卡片上任何 logo 都清晰）+ 名称
       ctx.fillStyle = col; ctx.beginPath(); ctx.arc(p.x + 12, p.y + 15, 3.5, 0, 6.3); ctx.fill();
-      ctx.fillStyle = tm[1]; roundLabel(p.x + 20, p.y + 8, 24, 14, tm[0]);
+      var logo = dbLogoImg(n.db_type), chipW = logo ? logoChipW(logo) : 20;
+      if (logo){
+        ctx.fillStyle = 'rgba(255,255,255,.92)';
+        rr(p.x + 21, p.y + 6, chipW, 18, 4); ctx.fill();
+        drawLogoContain(logo, p.x + 23, p.y + 8, chipW - 4, 14);
+      } else {
+        // 未收录该类型（或 logo 加载失败）：回退 emoji 图标
+        ctx.font = '15px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillText(dbIcon(n.db_type), p.x + 22, p.y + 16);
+      }
       ctx.fillStyle = C.tx; ctx.font = '11px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      var nm = n.name.length > 13 ? n.name.slice(0, 12) + '…' : n.name;
-      ctx.fillText(nm, p.x + 50, p.y + 15);
+      // 名称限宽到「logo 章之后 → 右上角斜三角角标之前」，避免与角标重叠
+      ctx.fillText(fitText(n.name, instW - 57 - chipW), p.x + 25 + chipW, p.y + 15);
+      /* 右上角斜三角角标（裁剪在卡片圆角内）：
+         正常节点 = 数据库类型主色；故障节点 = 红色 + 白色「!」。
+         卡片上不再画错误长文案（限宽 210 会压到相邻节点造成错乱），
+         仅用角标提示有错误，点击节点后在右侧详情面板展示完整错误。 */
+      var corner = n.err ? 32 : 26;
+      ctx.save();
+      rr(p.x, p.y, instW, instH, 6); ctx.clip();
+      ctx.beginPath();
+      ctx.moveTo(p.x + instW - corner, p.y + 1);
+      ctx.lineTo(p.x + instW - 1, p.y + 1);
+      ctx.lineTo(p.x + instW - 1, p.y + corner + 1);
+      ctx.closePath();
+      ctx.globalAlpha = n.err ? 1 : .32;
+      ctx.fillStyle = n.err ? C.crit : tm[1];
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      if (n.err){
+        ctx.fillStyle = '#FFFFFF'; ctx.font = 'bold 12px sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('!', p.x + instW - 11, p.y + 12);
+        ctx.textAlign = 'left';
+      }
+      ctx.restore();
       // 第2行：状态 + 连接数
       var stx = { ok: S.st_ok, warn: S.st_warn, crit: S.st_crit, down: S.st_down }[n.status];
       ctx.font = '10px sans-serif';
@@ -644,18 +743,16 @@ function drawTopo(){
       ctx.fillText('QPS ' + fmt(n.qps), p.x + 12, p.y + 52);
       ctx.fillText('TPS ' + fmt(n.tps), p.x + 82, p.y + 52);
       ctx.fillText(S.node_slowq + ' ' + fmt(n.slowq), p.x + 152, p.y + 52);
-      // 第4行：错误 > 表空间/复制延迟 > 地址（按信息优先级展示其一）
-      if (n.err){
-        ctx.fillStyle = C.crit;
-        ctx.fillText(fitText(n.err, instW - 24), p.x + 12, p.y + 68);
-      } else {
-        var extra = null, exC = C.warn;
-        if (n.tbs_free_pct !== null && n.tbs_free_pct !== undefined) extra = S.node_tbs + ' ' + n.tbs_free_pct + '%';
-        else if (n.repl_lag_s !== null && n.repl_lag_s !== undefined) extra = S.node_repl + ' ' + n.repl_lag_s + 's';
-        else if (n.stat_hint) { extra = (n.stat_hint === 'view_server_state' ? S.hint_vss : S.hint_stat); exC = C.tx2; }
-        ctx.fillStyle = extra ? exC : C.tx2;
-        ctx.fillText(fitText(extra || (n.host + ':' + n.port), instW - 24), p.x + 12, p.y + 68);
-      }
+      // 第4行：表空间/复制延迟/地址（按信息优先级展示其一）
+      // 连接/查询错误不再在此处输出长文案（卡片限宽会压到相邻节点造成错乱），
+      // 统一由右上角 ⚠ 标志提示，点击节点后在右侧详情面板查看完整错误。
+      var extra = null, exC = C.warn;
+      if (n.tbs_free_pct !== null && n.tbs_free_pct !== undefined) extra = S.node_tbs + ' ' + n.tbs_free_pct + '%';
+      else if (n.repl_lag_s !== null && n.repl_lag_s !== undefined) extra = S.node_repl + ' ' + n.repl_lag_s + 's';
+      else if (n.stat_hint && !n.err) { extra = (n.stat_hint === 'view_server_state' ? S.hint_vss : S.hint_stat); exC = C.tx2; }
+      ctx.font = '10px sans-serif';
+      ctx.fillStyle = extra ? exC : C.tx2;
+      ctx.fillText(fitText(extra || (n.host + ':' + n.port), instW - 24), p.x + 12, p.y + 68);
       // 连接利用率条（节点底边）
       var cu = n.conn ? (n.conn.usage_pct || 0) : 0;
       if (cu > 0){
@@ -673,13 +770,6 @@ function drawTopo(){
     return 'ok';
   }
 }
-function roundLabel(x, y, w, h, txt){
-  ctx.beginPath(); ctx.roundRect(x, y, w, h, 4);
-  ctx.globalAlpha = .22; ctx.fill(); ctx.globalAlpha = 1;
-  ctx.fillStyle = C.tx; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText(txt, x + w / 2, y + h / 2 + .5);
-}
-
 /* 按当前字体与最大宽度自适应截断（超出加省略号），用于节点卡片内文本防溢出 */
 function fitText(txt, maxW){
   txt = String(txt);
@@ -768,8 +858,9 @@ function detailHtml(n){
   var st = { ok: S.st_ok, warn: S.st_warn, crit: S.st_crit, down: S.st_down }[n.status];
   var rows = [
     [S.d_status, '<span style="color:' + statusColor(n.status) + '">' + st + '</span>'],
-    [S.d_type, esc(n.db_type) + ' / ' + esc(n.group)],
+    [S.d_type, dbLogoHtml(n.db_type) + ' ' + esc(n.db_type) + ' / ' + esc(n.group)],
     [S.d_addr, esc(n.host) + ':' + esc(n.port)],
+    [S.ssh, (n.ssh && n.ssh.enabled) ? esc(n.ssh.host) + ':' + esc(n.ssh.port) + ' (' + esc(n.ssh.user) + ')' : '–'],
     [S.d_conn, n.conn ? n.conn.total + ' / ' + n.conn.max_conn : '–'],
     [S.d_active, n.conn ? n.conn.active + ' / ' + n.conn.blocked : '–'],
     [S.d_util, n.conn ? (n.conn.usage_pct || 0) + '%' : '–'],
@@ -780,11 +871,19 @@ function detailHtml(n){
     [S.d_tbs, n.tbs_free_pct !== null && n.tbs_free_pct !== undefined ? n.tbs_free_pct + '%' : '–'],
     [S.d_cache, fmt(n.cache_hit_pct, '%')],
   ];
-  var h = '<h4>' + esc(n.name) + '</h4><table>';
+  var h = '<h4>' + esc(n.name) + '</h4>';
+  // 对应画布节点右上角的 ⚠ 标志：完整错误在这里展示（不截断，长句换行）
+  if (n.err){
+    h += '<div style="margin:2px 0 10px;padding:8px 10px;border-left:3px solid ' + C.crit +
+         ';background:rgba(220,38,38,.12);border-radius:0 6px 6px 0">' +
+         '<div style="color:' + C.crit + ';font-size:12px;font-weight:600;margin-bottom:4px">⚠ ' + esc(S.err_title) + '</div>' +
+         '<div style="color:' + C.tx + ';font-size:12px;line-height:1.5;word-break:break-all">' + esc(n.err) + '</div>' +
+         '</div>';
+  }
+  h += '<table>';
   rows.forEach(function(r){ h += '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>'; });
   h += '</table>';
   if (n.stat_hint && !n.err) h += '<div style="color:' + C.tx2 + ';margin-top:6px;font-size:12px">' + esc(n.stat_hint === 'view_server_state' ? S.hint_vss : S.hint_stat) + '</div>';
-  if (n.err) h += '<div style="color:' + C.crit + ';margin-top:6px;font-size:12px">' + esc(n.err).slice(0, 160) + '</div>';
   return h;
 }
 function closeDetail(){
@@ -993,6 +1092,7 @@ function toggleFs(){
 }
 
 /* 启动 */
+loadDBLogos();
 resizeCanvas();
 frame();
 poll();

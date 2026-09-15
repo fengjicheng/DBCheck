@@ -2351,6 +2351,7 @@ RU.update({
 
     "webui.home_hero_subtitle": "Как енот ночью на охоте — находим скрытые проблемы баз данных",
     "webui.home_quick_diagnose": "Интеллектуальная диагностика",
+    "webui.home_quick_screen": "Панель мониторинга",
     "webui.home_stat_datasources": "Подключённые источники данных",
     "webui.home_stat_db_types": "Поддерживаемые типы БД",
     "webui.home_stat_inspections": "Всего проверок",

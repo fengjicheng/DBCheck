@@ -2555,6 +2555,7 @@ ZI = {
 
     "webui.home_hero_subtitle": "像浣熊一样夜行探索，让隐藏的数据库问题无所遁形",
     "webui.home_quick_diagnose": "智能诊断",
+    "webui.home_quick_screen": "监控大屏",
     "webui.home_stat_datasources": "已接入数据源",
     "webui.home_stat_db_types": "支持数据库类型",
     "webui.home_stat_inspections": "累计巡检次数",
@@ -3306,6 +3307,8 @@ ZI.update({
     "menu.monitor-screen": "监控大屏",
     "menu.monitor-slow": "慢查询监控",
     "webui.screen_hint_vss": "需 VIEW SERVER STATE 权限，无法采集 QPS/TPS",
+    "webui.screen_ssh": "SSH 跳板",
+    "webui.screen_err_title": "错误详情（点击节点查看）",
     "webui.screen_hint_stat": "性能指标查询失败（可能缺少监控权限）",
     "menu.notifier": "通知管理",
     "menu.oracle-client": "Oracle客户端",

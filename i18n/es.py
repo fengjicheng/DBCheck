@@ -2350,6 +2350,7 @@ ES.update({
 
     "webui.home_hero_subtitle": "Como un mapache nocturno, descubre problemas ocultos en bases de datos",
     "webui.home_quick_diagnose": "Diagnóstico inteligente",
+    "webui.home_quick_screen": "Panel de monitoreo",
     "webui.home_stat_datasources": "Fuentes de datos conectadas",
     "webui.home_stat_db_types": "Tipos de bases de datos compatibles",
     "webui.home_stat_inspections": "Inspecciones totales",

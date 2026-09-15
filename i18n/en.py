@@ -2526,6 +2526,7 @@ EN = {
 
     "webui.home_hero_subtitle": "Prowl the night like a raccoon, uncover hidden database issues",
     "webui.home_quick_diagnose": "Smart Diagnosis",
+    "webui.home_quick_screen": "Live Dashboard",
     "webui.home_stat_datasources": "Connected Data Sources",
     "webui.home_stat_db_types": "Supported Database Types",
     "webui.home_stat_inspections": "Total Inspections",
@@ -3277,6 +3278,8 @@ EN.update({
     "menu.monitor-slow": "Slow Query Monitor",
     "webui.screen_hint_vss": "VIEW SERVER STATE permission required for QPS/TPS",
     "webui.screen_hint_stat": "Perf-counter query failed (insufficient permission)",
+    "webui.screen_ssh": "SSH Jump",
+    "webui.screen_err_title": "Error Detail (click node to view)",
     "menu.notifier": "Notification Management",
     "menu.oracle-client": "Oracle Client",
     "menu.plugin-market": "Plugin Market",

@@ -2351,6 +2351,7 @@ FR.update({
 
     "webui.home_hero_subtitle": "Comme un raton laveur nocturne, découvrez les problèmes cachés de vos bases de données",
     "webui.home_quick_diagnose": "Diagnostic intelligent",
+    "webui.home_quick_screen": "Tableau de bord temps réel",
     "webui.home_stat_datasources": "Sources de données connectées",
     "webui.home_stat_db_types": "Types de bases de données pris en charge",
     "webui.home_stat_inspections": "Inspections au total",

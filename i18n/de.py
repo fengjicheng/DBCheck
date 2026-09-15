@@ -2351,6 +2351,7 @@ DE.update({
 
     "webui.home_hero_subtitle": "Wie ein Waschbär in der Nacht – versteckte Datenbankprobleme aufdecken",
     "webui.home_quick_diagnose": "Intelligente Diagnose",
+    "webui.home_quick_screen": "Live-Dashboard",
     "webui.home_stat_datasources": "Verbundene Datenquellen",
     "webui.home_stat_db_types": "Unterstützte Datenbanktypen",
     "webui.home_stat_inspections": "Inspektionen gesamt",

@@ -35,7 +35,7 @@ Webhook 代理与 SSL 配置说明：
     WEBHOOK_VERIFY_SSL=false
 """
 from modules.core.paths import PROJECT_ROOT
-import os, ssl, smtplib, json, datetime, mimetypes
+import os, ssl, smtplib, json, datetime, mimetypes, time, threading
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
@@ -55,31 +55,68 @@ CONFIG_FILE = os.path.join(SCRIPT_DIR, 'dbc_config.json')
 ENCRYPTION_KEY_NAME = 'notification_encryption_key'
 
 
-def _get_fernet():
-    """获取或创建 Fernet 加密密钥（保存在 dbc_config.json 的 notification 节点）"""
-    if not HAS_CRYPTOGRAPHY:
-        return None
-    config = {}
-    if os.path.exists(CONFIG_FILE):
+# SMTP 发送串行锁：多数 SMTP 服务限制同一账号的并发会话数，
+# 多个告警线程同时发信会被拒一条（表现为「多个告警只收到一封邮件」）
+_SMTP_SEND_LOCK = threading.Lock()
+
+
+def _read_config_file():
+    """读取 dbc_config.json；瞬时损坏（并发写半截）重试一次，持续损坏返回 None。
+
+    返回 None 表示「不要写」——否则会以 {} 为基底整体覆盖，清空其他配置节点。
+    """
+    for attempt in (1, 2):
+        if not os.path.exists(CONFIG_FILE):
+            return {}
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
+                return json.load(f)
         except Exception:
-            pass
-    key_b64 = config.get('notification', {}).get(ENCRYPTION_KEY_NAME)
+            if attempt == 1:
+                time.sleep(0.05)
+    return None
+
+
+def _atomic_write_json(path, data):
+    """原子写 JSON：先写临时文件再 os.replace，避免并发读到半截文件。"""
+    tmp = path + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def _get_fernet(create=True):
+    """获取 Fernet 加密密钥（保存在 dbc_config.json 的 notification 节点）。
+
+    create=False（解密路径）时绝不生成/写文件——否则密钥缺失或配置瞬时
+    不可读时会轮换密钥，导致已存密文永久无法解密。
+    """
+    if not HAS_CRYPTOGRAPHY:
+        return None
+    config = _read_config_file()
+    if config is None:
+        # 配置文件持续不可读：中止，绝不整体覆盖（会把其他配置节点全部清空）
+        print('dbc_config.json 读取失败，已跳过加密密钥操作以避免破坏配置')
+        return None
+    key_b64 = (config.get('notification') or {}).get(ENCRYPTION_KEY_NAME)
     if key_b64:
         return Fernet(key_b64.encode('utf-8'))
+    if not create:
+        return None
     key = Fernet.generate_key()
     key_b64 = key.decode('utf-8')
     if 'notification' not in config:
         config['notification'] = {}
     config['notification'][ENCRYPTION_KEY_NAME] = key_b64
     try:
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(config, f, ensure_ascii=False, indent=2)
+        _atomic_write_json(CONFIG_FILE, config)
     except Exception as e:
         print('保存加密密钥失败: %s' % e)
     return Fernet(key)
+
+
+# 解密失败只提示一次（每轮采样都会调 _load_config，避免刷屏）
+_decrypt_fail_logged = [False]
 
 
 def _encrypt_password(password):
@@ -104,14 +141,21 @@ def _decrypt_password(encrypted):
         if not HAS_CRYPTOGRAPHY:
             print('cryptography 库未安装，无法解密密码')
             return ''
-        fernet = _get_fernet()
+        fernet = _get_fernet(create=False)
         if fernet is None:
             print('获取加密密钥失败，无法解密密码')
             return ''
         try:
-            return fernet.decrypt(encrypted[5:].encode('utf-8')).decode('utf-8')
+            pwd = fernet.decrypt(encrypted[5:].encode('utf-8')).decode('utf-8')
+            _decrypt_fail_logged[0] = False  # 解密成功，重新武装失败提示
+            return pwd
         except Exception as e:
-            print('解密邮件密码失败: %s' % e)
+            # InvalidToken 的 str() 为空串，故给出可操作的说明；只提示一次防刷屏
+            if not _decrypt_fail_logged[0]:
+                _decrypt_fail_logged[0] = True
+                print('解密邮件密码失败: %s —— 密文与当前加密密钥不匹配'
+                      '（密钥曾被重置或配置文件曾被异常重建）。'
+                      '请在 Web 设置页重新填写并保存邮箱密码以恢复邮件通知。' % e)
             return ''
     elif encrypted.startswith('_b64_'):
         import base64
@@ -185,13 +229,9 @@ def _load_config():
     cfg = {}
 
     # 从 dbc_config.json 的 notification 节点读取
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                cfg = config.get('notification', {})
-        except Exception:
-            pass
+    config = _read_config_file()
+    if config:
+        cfg = config.get('notification', {}) or {}
 
     # 从旧 notifier_config.json 迁移（存在则合并后删除）
     old_path = os.path.join(SCRIPT_DIR, 'notifier_config.json')
@@ -263,20 +303,30 @@ def _load_config():
 def _save_config(cfg):
     """保存通知配置到 dbc_config.json（只更新 notification 节点，保留其他配置）"""
     try:
-        config = {}
-        if os.path.exists(CONFIG_FILE):
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-
         save_cfg = json.loads(json.dumps(cfg))
 
+        # 先加密（首次会生成并持久化加密密钥），再读基底配置，
+        # 否则本次读到的旧快照会把 _get_fernet 刚写入的密钥冲掉
         if 'email' in save_cfg and 'password' in save_cfg['email']:
             save_cfg['email']['password'] = _encrypt_password(save_cfg['email']['password'])
+            # 密码重新加密成功后，重置解密失败提示标记（下次失败允许再提示一次）
+            _decrypt_fail_logged[0] = False
+
+        config = _read_config_file()
+        if config is None:
+            # 配置文件持续不可读：中止保存，避免以空配置为基底整体覆盖
+            print('dbc_config.json 读取失败，已放弃保存通知配置以避免破坏其他配置节点')
+            return False
+
+        # notification 节点是整体替换，必须显式保留已持久化的加密密钥，
+        # 否则首次保存密码时刚生成的密钥会被冲掉，密文从此永久无法解密
+        existing_key = (config.get('notification') or {}).get(ENCRYPTION_KEY_NAME)
+        if existing_key:
+            save_cfg[ENCRYPTION_KEY_NAME] = existing_key
 
         config['notification'] = save_cfg
 
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(config, f, ensure_ascii=False, indent=2)
+        _atomic_write_json(CONFIG_FILE, config)
         return True
     except Exception as e:
         print('保存通知配置失败: %s' % e)
@@ -398,6 +448,22 @@ class EmailNotifier:
 
         return self._send_smtp(msg, recipients)
 
+    def send_alert_mail(self, subject, html_body, recipients=None):
+        """发送告警邮件（HTML 正文、无附件），返回 (ok, error_msg)。
+
+        与 send_report（巡检报告带附件）区分：告警通知追求轻量即时。
+        """
+        if not recipients:
+            recipients = self.recipients or []
+        if not recipients:
+            return False, '没有指定收件人'
+        msg = MIMEMultipart('alternative')
+        msg['From'] = self.user
+        msg['To'] = ', '.join(recipients)
+        msg['Subject'] = subject
+        msg.attach(MIMEText(html_body, 'html', 'utf-8'))
+        return self._send_smtp(msg, recipients)
+
     def send_test(self, recipients=None):
         """发送测试邮件（无附件，纯通知），返回 (ok, error_msg)"""
         if not recipients:
@@ -425,6 +491,11 @@ class EmailNotifier:
         return self._send_smtp(msg, recipients)
 
     def _send_smtp(self, msg, recipients):
+        # 串行发送：避免同账号并发 SMTP 会话被服务端限制拒绝
+        with _SMTP_SEND_LOCK:
+            return self._send_smtp_locked(msg, recipients)
+
+    def _send_smtp_locked(self, msg, recipients):
         try:
             if self.port == 465:
                 server = smtplib.SMTP_SSL(self.host, self.port, timeout=30)
@@ -608,6 +679,30 @@ class WebhookNotifier:
         except Exception as e:
             print('Webhook 发送异常: %s' % e)
             return False
+
+    def send_markdown(self, title, md_text):
+        """发送 markdown 通知（企业微信/钉钉/自定义 Webhook），返回 bool。
+
+        与 send_alert（定时巡检通知固定文案）区分：供告警等场景自定义标题与内容。
+        """
+        if not self.url:
+            print('Webhook 发送跳过: URL 未配置')
+            return False
+        if self.wtype == 'dingtalk':
+            payload = {
+                'msgtype': 'markdown',
+                'markdown': {'title': title, 'text': md_text},
+                'at': {'atMobiles': self.at_mobiles, 'isAtAll': self.is_at_all},
+            }
+        elif self.wtype == 'wecom':
+            payload = {'msgtype': 'markdown', 'markdown': {'content': md_text}}
+        else:
+            payload = {
+                'title': title,
+                'message': md_text,
+                'timestamp': datetime.datetime.now().isoformat(),
+            }
+        return self._send_webhook(payload)
 
     def test_connection(self):
         try:

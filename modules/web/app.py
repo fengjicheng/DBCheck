@@ -6068,7 +6068,7 @@ def monitor_screen_page():
              'instances', 'fold_tip', 'total_n', 'n_hosts',
              'd_status', 'd_type', 'd_addr', 'd_conn', 'd_active', 'd_util', 'd_qps',
              'd_slowq', 'd_locks', 'd_repl', 'd_tbs', 'd_cache',
-             'hint_vss', 'hint_stat']
+             'hint_vss', 'hint_stat', 'ssh', 'err_title']
     S = {k: _t('webui.screen_' + k) for k in _keys}
     return render_template('monitor_screen.html', version=__version__, S=S)
 

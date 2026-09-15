@@ -2349,6 +2349,7 @@ KO.update({
 
     "webui.home_hero_subtitle": "너구리처럼 밤에 탐색하며 숨겨진 데이터베이스 문제를 찾아냅니다",
     "webui.home_quick_diagnose": "스마트 진단",
+    "webui.home_quick_screen": "모니터링 대시보드",
     "webui.home_stat_datasources": "연결된 데이터 소스",
     "webui.home_stat_db_types": "지원 데이터베이스 유형",
     "webui.home_stat_inspections": "누적 점검 횟수",

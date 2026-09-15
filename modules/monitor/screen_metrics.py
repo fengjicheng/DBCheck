@@ -33,6 +33,7 @@ from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
 from modules.monitor.queries import normalize_db_type
+from modules.monitor.native_collect import NATIVE_DB_TYPES, collect_native
 
 # ═══════════════════════════════════════════════════════════
 #  db_type → family 归并
@@ -214,6 +215,37 @@ CLICKHOUSE_TBS_SQL = (
     "GROUP BY database ORDER BY total_mb DESC LIMIT 10"
 )
 
+# ── GBase 8s 复制 / 锁 ──
+# 复制延迟：sysmaster:sysdri 仅暴露 HDR 状态列（type/state/name 等），
+# 无「秒级延迟」列（onstat -g hdr 的 log page distance 无法用 SQL 取秒数）。
+# 故 DR 激活且已配对（name 非空）视为已同步 → repl_lag_s=0；未配置 HDR 置 None。
+GBASE_REPL_SQL = "SELECT type, state, name FROM sysmaster:sysdri"
+
+# 锁等待：syslocks.waiter 非空的行即阻塞等待（多源确认列名），count 即等待会话数。
+GBASE_LOCKS_SQL = (
+    "SELECT count(*) AS n FROM sysmaster:syslocks WHERE waiter IS NOT NULL"
+)
+
+# ── DB2 复制 / 锁 ──
+# HADR 备库回放延迟（毫秒）；未配置 HADR 时 MON_GET_HADR 返回空集 → 保持 None。
+DB2_REPL_SQL = (
+    "SELECT MAX(STANDBY_REPLAY_DELAY) AS lag_ms FROM TABLE(MON_GET_HADR(-1))"
+)
+
+# 锁等待：SYSIBMADM.LOCKWAITS 每行一个等待者（需 SYSMON/MON 权限，缺失则降级 None）。
+DB2_LOCKS_SQL = "SELECT count(*) AS n FROM SYSIBMADM.LOCKWAITS"
+
+# ── ClickHouse 复制 / 锁 ──
+# 复制延迟：ReplicatedMergeTree 的 absolute_delay 单位为秒。
+CLICKHOUSE_REPL_SQL = (
+    "SELECT max(absolute_delay) AS lag_s FROM system.replicas"
+)
+
+# ClickHouse 无行级锁；以「未完成 mutation（卡住/阻塞的 schema 变更）」数作代理指标。
+CLICKHOUSE_LOCKS_SQL = (
+    "SELECT count(*) AS n FROM system.mutations WHERE NOT is_done"
+)
+
 SCREEN_SQLS = {
     'mysql': {'stat': MYSQL_STAT_SQL, 'tbs': MYSQL_TBS_SQL,
               'repl': MYSQL_REPL_SQL, 'repl8': MYSQL_REPL_SQL8},
@@ -225,9 +257,12 @@ SCREEN_SQLS = {
                   'locks': SQLSERVER_LOCKS_SQL},
     'dm': {'stat': DM_STAT_SQL, 'tbs': DM_TBS_SQL, 'repl': DM_REPL_SQL,
            'locks': DM_LOCKS_SQL},
-    'gbase': {'stat': GBASE_STAT_SQL, 'tbs': GBASE_TBS_SQL},
-    'db2': {'stat': DB2_STAT_SQL, 'tbs': DB2_TBS_SQL},
-    'clickhouse': {'stat': CLICKHOUSE_STAT_SQL, 'tbs': CLICKHOUSE_TBS_SQL},
+    'gbase': {'stat': GBASE_STAT_SQL, 'tbs': GBASE_TBS_SQL,
+              'repl': GBASE_REPL_SQL, 'locks': GBASE_LOCKS_SQL},
+    'db2': {'stat': DB2_STAT_SQL, 'tbs': DB2_TBS_SQL,
+            'repl': DB2_REPL_SQL, 'locks': DB2_LOCKS_SQL},
+    'clickhouse': {'stat': CLICKHOUSE_STAT_SQL, 'tbs': CLICKHOUSE_TBS_SQL,
+                   'repl': CLICKHOUSE_REPL_SQL, 'locks': CLICKHOUSE_LOCKS_SQL},
 }
 
 
@@ -480,6 +515,16 @@ def collect_extra(engine, instance_id, db_type):
             extras['tbs'] = [
                 {'name': r.get('name'), 'total_mb': _num(r.get('total_mb')),
                  'free_mb': None, 'free_pct': None} for r in tbs]
+        repl = q('repl')
+        if repl:
+            # HDR 激活且已配对（name 非空）视为同步 → 0 秒；其余（含未配置 HDR）留 None
+            st = str(_find_key(repl[0], 'state') or '').strip().lower()
+            paired = bool(str(_find_key(repl[0], 'name') or '').strip())
+            if st == 'on' and paired:
+                extras['repl_lag_s'] = 0
+        locks = q('locks')
+        if locks:
+            extras['lock_waits'] = int(_num(_scalar(locks)))
 
     elif fam == 'db2':
         # DB2（MON_GET_DATABASE 累计计数，列名经真实实例实测）：
@@ -504,6 +549,15 @@ def collect_extra(engine, instance_id, db_type):
                  'free_pct': (round(_num(r.get('free_mb')) / _num(r.get('total_mb')) * 100, 1)
                               if _num(r.get('total_mb')) > 0 else None)}
                 for r in tbs]
+        repl = q('repl')
+        if repl:
+            # STANDBY_REPLAY_DELAY 为毫秒；未配置 HADR 返回空集/NULL → 保持 None
+            lag_ms = _scalar(repl, 'lag_ms')
+            if lag_ms is not None and str(lag_ms).strip() != '':
+                extras['repl_lag_s'] = int(_num(lag_ms) / 1000)
+        locks = q('locks')
+        if locks:
+            extras['lock_waits'] = int(_num(_scalar(locks)))
 
     elif fam == 'clickhouse':
         # ClickHouse（system.events 累计计数）：Query 作 QPS，InsertQuery 作写入 TPS。
@@ -523,6 +577,15 @@ def collect_extra(engine, instance_id, db_type):
             extras['tbs'] = [
                 {'name': r.get('name'), 'total_mb': _num(r.get('total_mb')),
                  'free_mb': None, 'free_pct': None} for r in tbs]
+        repl = q('repl')
+        if repl:
+            # absolute_delay 单位秒；无复制表（system.replicas 空集）→ None
+            lag = _scalar(repl, 'lag_s')
+            if lag is not None and str(lag).strip() != '':
+                extras['repl_lag_s'] = int(_num(lag))
+        locks = q('locks')
+        if locks:
+            extras['lock_waits'] = int(_num(_scalar(locks)))
 
     return counters, extras
 
@@ -656,6 +719,13 @@ class ScreenCollector:
                 self._prev.pop(stale_iid, None)
                 self._spark.pop(stale_iid, None)
 
+        # 告警状态机评估（锁外）：状态迁移时经通知配置发邮件/IM（异步发送）
+        try:
+            from modules.monitor.alert_notify import get_alert_tracker
+            get_alert_tracker().update(list(results.values()))
+        except Exception as e:
+            print('[alert] 告警评估失败: %s' % e, flush=True)
+
     @staticmethod
     def _rate(prev_c, cur_c, dt, kind):
         """按 kind 计算每秒速率；任一计数缺失返回 None。
@@ -681,6 +751,7 @@ class ScreenCollector:
         iid = inst['id']
         db_type = (inst.get('db_type') or '').lower()
         snap = {
+            'id': iid,  # 告警状态机按 id 跟踪实例（update() 无 id 的快照会被跳过）
             'name': inst.get('name', iid),
             'db_type': db_type,
             'group': inst.get('group') or 'default',
@@ -692,7 +763,31 @@ class ScreenCollector:
             'cache_hit_pct': None, 'lock_waits': None, 'repl_lag_s': None,
             'tbs': None, 'err': None, 'status': 'ok', 'counters': {},
             'stat_hint': None,
+            # SSH 跳板信息：用于大屏主机节点展示"经由此网关/跳板可达该实例"
+            'ssh': {
+                'enabled': bool(inst.get('ssh_enabled')),
+                'host': inst.get('ssh_host') or '',
+                'port': inst.get('ssh_port') or 22,
+                'user': inst.get('ssh_user') or '',
+            },
         }
+
+        # 0) MongoDB / Redis 原生驱动通道：SQL 引擎（DBAPI/JDBC）不覆盖的
+        #    NoSQL 类型在此直连采集，连通性与指标一并拿到后提前返回。
+        if db_type in NATIVE_DB_TYPES:
+            nd = collect_native(inst)
+            if not nd.get('alive'):
+                snap['err'] = nd.get('err')
+                snap['status'] = 'down'
+                return snap
+            snap['conn'] = nd.get('conn')
+            snap['counters'] = nd.get('counters') or {}
+            snap['tbs'] = nd.get('tbs')
+            snap['repl_lag_s'] = nd.get('repl_lag_s')
+            snap['lock_waits'] = nd.get('lock_waits')
+            snap['slowq'] = nd.get('slowq') or 0
+            snap['status'] = self._derive_status(snap)
+            return snap
 
         # 1) 连接与会话（复用 MonitorEngine 采集结果）
         cd = conn_data.get(iid)
@@ -810,6 +905,7 @@ def build_overview(collector):
             'lock_waits': s.get('lock_waits'), 'repl_lag_s': s.get('repl_lag_s'),
             'tbs_free_pct': worst_tbs, 'spark': s.get('spark') or [],
             'stat_hint': s.get('stat_hint'),
+            'ssh': s.get('ssh'),
         })
 
     # KPI

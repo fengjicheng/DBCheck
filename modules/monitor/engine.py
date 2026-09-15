@@ -93,6 +93,9 @@ class MonitorEngine:
         self._last_collect_ts = 0
         # JDBC 批量采集缓存: {iid: {'ts': float, 'res': {sql: rows|('__err__',msg)}, 'lock': Lock}}
         self._jdbc_cache = {}
+        # 慢查询主 SQL 依赖缺失记忆（如 pg_stat_statements 扩展未安装）:
+        # 这些实例每轮直接走 fallback，不再重复刷错误日志
+        self._slow_prim_skip = set()
 
     # ═══════════════════════════════════════════════════════════
     #  启停控制
@@ -258,22 +261,33 @@ class MonitorEngine:
             return {'data': [], 'error': f'不支持的类型: {db_type}',
                     'ts': time.time(), 'db_type': db_type, 'label': label}
 
-        try:
-            rows = self._connect_and_query(instance_id, sql)
-        except Exception as e:
-            print(f"[Monitor] 慢查询 SQL 失败 {label}: {e}", flush=True)
-            # 尝试 fallback SQL
-            fallback_sql = mq.SLOW_QUERY_FALLBACK_TEMPLATES.get(db_type)
-            if fallback_sql:
-                try:
-                    rows = self._connect_and_query(instance_id, fallback_sql)
-                    print(f"[Monitor] {label} 使用 fallback 慢查询 SQL", flush=True)
-                except Exception as fb:
-                    print(f"[Monitor] 慢查询 fallback 亦失败 {label}: {fb}", flush=True)
-                    return {'data': [], 'error': _friendly_db_error(fb),
+        fallback_sql = mq.SLOW_QUERY_FALLBACK_TEMPLATES.get(db_type)
+        rows = None
+        if instance_id not in self._slow_prim_skip:
+            try:
+                rows = self._connect_and_query(instance_id, sql)
+            except Exception as e:
+                low = str(e).lower()
+                # 依赖对象缺失（如 pg_stat_statements / performance_schema 未安装）→
+                # 记忆化：首行错误摘要打印一次，后续轮直接 fallback，不再重复刷日志
+                if fallback_sql and ('does not exist' in low or "doesn't exist" in low):
+                    self._slow_prim_skip.add(instance_id)
+                    print(f"[Monitor] {label} 慢查询主 SQL 依赖缺失（{str(e).splitlines()[0][:100]}），"
+                          f"后续轮次直接使用 fallback", flush=True)
+                else:
+                    print(f"[Monitor] 慢查询 SQL 失败 {label}: {e}", flush=True)
+                if not fallback_sql:
+                    return {'data': [], 'error': _friendly_db_error(e),
                             'ts': time.time(), 'db_type': db_type, 'label': label}
-            else:
-                return {'data': [], 'error': _friendly_db_error(e),
+        if rows is None:
+            # fallback：主 SQL 失败降级，或已记忆依赖缺失直接走此路（静默）
+            try:
+                rows = self._connect_and_query(instance_id, fallback_sql)
+                if instance_id not in self._slow_prim_skip:
+                    print(f"[Monitor] {label} 使用 fallback 慢查询 SQL", flush=True)
+            except Exception as fb:
+                print(f"[Monitor] 慢查询 fallback 亦失败 {label}: {fb}", flush=True)
+                return {'data': [], 'error': _friendly_db_error(fb),
                         'ts': time.time(), 'db_type': db_type, 'label': label}
 
         result = {

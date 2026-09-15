@@ -2350,6 +2350,7 @@ JA.update({
 
     "webui.home_hero_subtitle": "アライグマのように夜を徘徊し、隠れたデータベース問題を発見する",
     "webui.home_quick_diagnose": "スマート診断",
+    "webui.home_quick_screen": "監視ダッシュボード",
     "webui.home_stat_datasources": "接続済みデータソース",
     "webui.home_stat_db_types": "対応データベース種別",
     "webui.home_stat_inspections": "累計検査回数",
