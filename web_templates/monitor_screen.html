@@ -167,6 +167,30 @@
     border: 2px solid rgba(255, 255, 255, .22); border-top-color: var(--accent);
     animation: spin .8s linear infinite;
   }
+  /* ── 全局错误 / 引导横幅：数据获取失败 / 无实例 / 采集器未启动 ── */
+  .status-bar {
+    position: absolute; top: 58px; left: 50%; transform: translateX(-50%);
+    z-index: 46; display: none; align-items: center; gap: 9px;
+    font-size: 12.5px; padding: 6px 16px; border-radius: 20px;
+    box-shadow: 0 6px 22px rgba(0, 0, 0, .55); max-width: 92vw;
+  }
+  .status-bar.show { display: flex; }
+  .status-bar .sb-icon { font-size: 14px; line-height: 1; }
+  #error-bar {
+    background: rgba(42, 14, 14, .96); border: 1px solid var(--crit); color: #FFB4B4;
+  }
+  #error-bar .sb-icon { color: var(--crit); animation: pulse 1s ease-in-out infinite; }
+  #guide-bar {
+    background: rgba(13, 22, 40, .96); border: 1px solid var(--blue); color: var(--tx);
+  }
+  #guide-bar .sb-icon { color: var(--blue); }
+  #freshness { font-size: 12px; color: var(--tx2); font-variant-numeric: tabular-nums;
+    padding: 4px 10px; border: 1px solid var(--border); border-radius: 8px; min-width: 92px; text-align: center; }
+  #freshness.stale { color: var(--crit); border-color: var(--crit); }
+  .trend-toggle { float: right; font-size: 11px; font-weight: 400; margin-top: -1px; }
+  .trend-toggle button { background: transparent; color: var(--tx2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 1px 8px; margin-left: 4px; cursor: pointer; font-size: 11px; }
+  .trend-toggle button.on { background: var(--accent); color: #04121E; border-color: var(--accent); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -182,17 +206,20 @@
     <div class="kpi acc"><div class="v" id="k-tps">–</div><div class="l">{{ S.k_tps }}</div></div>
   </div>
   <div id="clock">--:--:--</div>
+  <div id="freshness" class="fresh" title="">–</div>
   <button id="btn-fs" onclick="toggleFs()">{{ S.btn_fs }}</button>
 </header>
 
 <div id="loading-bar"><span class="spin-dot"></span><span id="loading-bar-txt"></span></div>
+<div id="error-bar" class="status-bar"><span class="sb-icon">⚠</span><span id="error-bar-txt"></span></div>
+<div id="guide-bar" class="status-bar"><span class="sb-icon">ℹ</span><span id="guide-bar-txt"></span></div>
 
 <main>
   <aside>
     <div class="panel"><h3>{{ S.qps_top }}</h3><div class="chart" id="c-qps"></div></div>
     <div class="panel"><h3>{{ S.conn_util_top }}</h3><div class="chart" id="c-conn"></div></div>
     <div class="panel"><h3>{{ S.conns_top }}</h3><div class="chart" id="c-conns"></div></div>
-    <div class="panel"><h3>{{ S.trend }}</h3><div class="chart" id="c-trend"></div></div>
+    <div class="panel"><h3>{{ S.trend }}<span class="trend-toggle"><button id="tm-global" class="on" onclick="setTrendMode('global')">{{ S.trend_global }}</button><button id="tm-inst" onclick="setTrendMode('inst')">{{ S.trend_by_inst }}</button></span></h3><div class="chart" id="c-trend"></div></div>
   </aside>
 
   <div class="panel" id="topo-panel">
@@ -353,6 +380,30 @@ function hideGlobalLoading(){
   var bar = document.getElementById('loading-bar');
   if (bar) bar.classList.remove('show');
 }
+/* 全局错误条：数据获取失败（网络/后端异常）时显示，并停止「努力读取」动画避免误导 */
+function showError(msg){
+  var bar = document.getElementById('error-bar');
+  if (!bar) return;
+  document.getElementById('error-bar-txt').textContent = msg;
+  bar.classList.add('show');
+  hideGuide();
+  endWarming();
+}
+function hideError(){
+  var bar = document.getElementById('error-bar');
+  if (bar) bar.classList.remove('show');
+}
+/* 全局引导条：无实例 / 采集器未启动时给明确操作指引 */
+function showGuide(msg){
+  var bar = document.getElementById('guide-bar');
+  if (!bar) return;
+  document.getElementById('guide-bar-txt').textContent = msg;
+  bar.classList.add('show');
+}
+function hideGuide(){
+  var bar = document.getElementById('guide-bar');
+  if (bar) bar.classList.remove('show');
+}
 /* 面板加载覆盖层：spinner + 脉动文案；数据未到时明显可见 */
 var loaders = {};
 function ensureLoader(id){
@@ -490,7 +541,7 @@ function resizeCanvas(){
   topo.width = r.width * dpr; topo.height = r.height * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
-window.addEventListener('resize', function(){ fittedForCount = -1; resizeCanvas(); layoutCharts(); });
+window.addEventListener('resize', function(){ fittedForCount = -1; layoutDirty = true; resizeCanvas(); layoutCharts(); });
 
 function statusColor(s){
   if (s === 'pending') return C.pending;   // 检测中：浅灰蓝，与 down 深灰区分
@@ -672,6 +723,7 @@ function layout(data){
 
 var layoutCache = { hostCol: {}, instPos: {} };
 var fittedForCount = -1;   // 上次拟合时的实例数（数据变化/窗口变化时重拟合）
+var layoutDirty = true;    // 拓扑布局是否需要重算（仅数据/窗口变化时重算，避免每帧重排）
 
 function fitView(W, H){
   if (!world.w) return;
@@ -689,7 +741,7 @@ function drawTopo(){
   ctx.save();
   nodes = [];
   var data = topoData;
-  var L = layout(data);      // 先重算世界尺寸
+  var L = layoutDirty ? (layoutCache = layout(data), layoutDirty = false, layoutCache) : layoutCache;  // 仅在数据/窗口变化时重算布局
   layoutCache = L;
   if (fittedForCount !== topoData.length) fitView(W, H);   // 再按最新世界拟合
   ctx.translate(view.ox, view.oy); ctx.scale(view.scale, view.scale);
@@ -907,6 +959,84 @@ function fitText(txt, maxW){
   return txt + '…';
 }
 
+/* 趋势图渲染：全局合计 / 实例下钻（按节点 spark 迷你趋势）两种模式 */
+var trendMode = 'global';          // 'global' = 全库合计 QPS；'inst' = 各实例 QPS 迷你趋势 Top8
+var lastOverview = null;           // 最近一次 refresh 的完整数据，供切换模式后重渲染
+var lastRefreshTs = 0;             // 最近一次成功拿到数据的时间戳（数据新鲜度基准）
+function drawTrend(){
+  if (!lastOverview) return;
+  var data = lastOverview;
+  if (trendMode === 'inst'){
+    // 实例下钻：取 spark（每个实例最近 N 个 QPS 采样）最新值最高的 Top8，右对齐到同一时间窗
+    var arr = (data.nodes || []).filter(function(n){ return (n.spark || []).length > 1 && n.status !== 'pending'; })
+              .sort(function(a, b){ return (b.spark[b.spark.length - 1] || 0) - (a.spark[a.spark.length - 1] || 0); })
+              .slice(0, 8);
+    if (!arr.length){
+      chart('c-trend').setOption({ graphic: [{ type: 'text', left: 'center', top: 'middle',
+        style: { text: S.no_data, fill: C.tx2, fontSize: 12 } }] }, true);
+      return;
+    }
+    var len = Math.max.apply(null, arr.map(function(n){ return n.spark.length; }));
+    var xs = []; for (var i = 0; i < len; i++) xs.push(i === len - 1 ? 'now' : '');
+    var series = arr.map(function(n){
+      var s = n.spark, pad = len - s.length, d = [];
+      for (var k = 0; k < pad; k++) d.push(null);
+      s.forEach(function(v){ d.push({ value: v, iid: n.id }); });
+      var col = statusColor(n.status);
+      return { name: n.name, type: 'line', data: d, smooth: true, symbol: 'none',
+               lineStyle: { width: 1.4, color: col }, areaStyle: { color: col + '14' } };
+    });
+    chart('c-trend').setOption({
+      animation: false, grid: BASE_GRID,
+      color: arr.map(function(n){ return statusColor(n.status); }),
+      tooltip: Object.assign({ trigger: 'axis',
+        formatter: function(ps){
+          return ps.filter(function(p){ return p.value != null; })
+                    .map(function(p){ return esc(p.seriesName) + '：<b>' + fmt(p.value) + '</b>'; }).join('<br>');
+        } }, TIP_STYLE),
+      legend: { top: 0, right: 4, itemWidth: 10, itemHeight: 8, type: 'scroll', textStyle: { color: C.tx2, fontSize: 10 } },
+      xAxis: { type: 'category', data: xs, axisLabel: { color: C.tx2, fontSize: 9 }, boundaryGap: false,
+               axisLine: { lineStyle: { color: C.border } } },
+      yAxis: { type: 'value', axisLabel: { color: C.tx2, fontSize: 10 },
+               splitLine: { lineStyle: { color: C.border, type: 'dashed' } }, scale: true },
+      series: series
+    }, true);
+    return;
+  }
+  // 全局合计趋势（与原本一致）
+  var tr = data.trend || [];
+  var trendOpt = {
+    animation: false,
+    grid: BASE_GRID,
+    tooltip: Object.assign({ trigger: 'axis' }, TIP_STYLE),
+    xAxis: { type: 'category', data: tr.map(function(t){
+        var d = new Date(t.ts * 1000);
+        return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2);
+      }), axisLabel: { color: C.tx2, fontSize: 10 }, boundaryGap: false,
+      axisLine: { lineStyle: { color: C.border } } },
+    yAxis: { type: 'value', axisLabel: { color: C.tx2, fontSize: 10 },
+             splitLine: { lineStyle: { color: C.border, type: 'dashed' } }, scale: true },
+    series: [{ type: 'line', data: tr.map(function(t){ return t.qps; }), smooth: true,
+      symbol: 'none', lineStyle: { color: C.accent, width: 1.8 },
+      areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+        { offset: 0, color: 'rgba(0,200,160,.32)' },
+        { offset: 1, color: 'rgba(0,200,160,0)' } ]) } }]
+  };
+  if (!tr.length){
+    trendOpt.graphic = [{ type: 'text', left: 'center', top: 'middle',
+      style: { text: S.no_data, fill: C.tx2, fontSize: 12 } }];
+    trendOpt.xAxis.show = false; trendOpt.yAxis.show = false;
+  }
+  chart('c-trend').setOption(trendOpt, true);
+}
+function setTrendMode(m){
+  trendMode = m;
+  var g = document.getElementById('tm-global'), i = document.getElementById('tm-inst');
+  if (g) g.classList.toggle('on', m === 'global');
+  if (i) i.classList.toggle('on', m === 'inst');
+  drawTrend();
+}
+
 /* 帧循环：flowT 推进 + 重绘 */
 function frame(){
   flowT += 0.016;
@@ -963,6 +1093,7 @@ topo.addEventListener('click', function(e){
   if (!hit) return;
   if (hit.kind === 'fold'){
     foldedGroups[hit.group] = !(foldedGroups[hit.group] !== undefined ? foldedGroups[hit.group] : true);
+    layoutDirty = true;
     return;
   }
   if (hit.kind === 'inst'){
@@ -1100,31 +1231,7 @@ function refresh(data){
   setBar('c-repl', T.repl_lag, C.blue, { unit: 's', showBg: true });
   setBar('c-lock', T.lock_wait, C.warn, { unit: '', showBg: true });
 
-  var tr = data.trend || [];
-  var trendOpt = {
-    animation: false,
-    grid: BASE_GRID,
-    tooltip: Object.assign({ trigger: 'axis' }, TIP_STYLE),
-    xAxis: { type: 'category', data: tr.map(function(t){
-        var d = new Date(t.ts * 1000);
-        return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2);
-      }), axisLabel: { color: C.tx2, fontSize: 10 }, boundaryGap: false,
-      axisLine: { lineStyle: { color: C.border } } },
-    yAxis: { type: 'value', axisLabel: { color: C.tx2, fontSize: 10 },
-             splitLine: { lineStyle: { color: C.border, type: 'dashed' } },
-             scale: true },
-    series: [{ type: 'line', data: tr.map(function(t){ return t.qps; }), smooth: true,
-      symbol: 'none', lineStyle: { color: C.accent, width: 1.8 },
-      areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-        { offset: 0, color: 'rgba(0,200,160,.32)' },
-        { offset: 1, color: 'rgba(0,200,160,0)' } ]) } }]
-  };
-  if (!tr.length){
-    trendOpt.graphic = [{ type: 'text', left: 'center', top: 'middle',
-      style: { text: S.no_data, fill: C.tx2, fontSize: 12 } }];
-    trendOpt.xAxis.show = false; trendOpt.yAxis.show = false;
-  }
-  chart('c-trend').setOption(trendOpt, true);
+  drawTrend();   // 趋势图（全局合计 / 实例下钻），数据来自 lastOverview
 
   var cnt = { ok: 0, warn: 0, crit: 0, down: 0, pending: 0, unsupported: 0 };
   (data.nodes || []).forEach(function(n){ cnt[n.status] = (cnt[n.status] || 0) + 1; });
@@ -1179,7 +1286,20 @@ function refresh(data){
     startTicker();
   }
 
+  layoutDirty = true;            // 节点数据变化，下次 drawTopo 重算布局（非每帧重排）
   topoData = data.nodes || [];
+  updateLoaders(data);
+  // 全局空状态引导：明确无实例（nodes 为空，区别于仍在 pending 采集）时立即给出操作指引，不必等 30s 预热超时
+  var _nodes = data.nodes || [];
+  if (_nodes.length === 0){
+    if (warmingUp) endWarming();
+    showGuide(k.probe_running === false ? S.guide_no_collector : S.guide_no_instance);
+  } else {
+    hideGuide();
+  }
+  lastOverview = data;           // 供趋势图实例下钻重渲染
+  drawTrend();                   // 趋势图（全局合计 / 实例下钻）随每次刷新重绘
+  lastRefreshTs = Date.now();    // 数据新鲜度基准
 }
 
 /* 告警滚动（CSS 变换，每 30ms 推进） */
@@ -1204,9 +1324,14 @@ function layoutCharts(){
 async function poll(){
   try {
     var r = await fetch('/api/dashboard/overview');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
     var data = await r.json();
-    if (data.ok) refresh(data);
-  } catch (e) { /* 网络抖动静默重试 */ }
+    if (!data || data.ok !== true) throw new Error('bad payload');
+    hideError();
+    refresh(data);
+  } catch (e) {
+    showError(S.fetch_error);
+  }
 }
 
 /* 时钟 */
@@ -1236,6 +1361,17 @@ loadDBLogos();
 initCharts();          // 页面加载即初始化所有 ECharts 占位面板（秒出基础结构）
 resizeCanvas();
 layoutCharts();
+function updateFreshness(){
+  var el = document.getElementById('freshness');
+  if (!el) return;
+  if (!lastRefreshTs){ el.textContent = '–'; el.className = 'fresh'; return; }
+  var secs = Math.floor((Date.now() - lastRefreshTs) / 1000);
+  el.textContent = S.fresh_label + ' ' + secs + 's';
+  el.className = 'fresh' + (secs > 30 ? ' stale' : '');   // 超过 30s 视为数据可能过期，变红提示
+  el.title = secs > 30 ? S.fresh_stale : '';
+}
+updateFreshness();
+setInterval(updateFreshness, 1000);
 frame();
 poll().then(scheduleNextPoll, scheduleNextPoll);
 </script>

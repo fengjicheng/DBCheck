@@ -957,7 +957,7 @@ def build_overview(collector):
 
     # KPI
     total = len(nodes)
-    online = sum(1 for n in nodes if n['status'] in ('ok', 'warn', 'crit'))
+    online = sum(1 for n in nodes if n['status'] in ('ok', 'warn', 'crit', 'unsupported'))
     pending = sum(1 for n in nodes if n['status'] == 'pending')
     warn = sum(1 for n in nodes if n['status'] == 'warn')
     crit = sum(1 for n in nodes if n['status'] == 'crit')
