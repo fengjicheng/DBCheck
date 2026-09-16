@@ -6071,7 +6071,11 @@ def monitor_screen_page():
              'instances', 'fold_tip', 'total_n', 'n_hosts',
              'd_status', 'd_type', 'd_addr', 'd_conn', 'd_active', 'd_util', 'd_qps',
              'd_slowq', 'd_locks', 'd_repl', 'd_tbs', 'd_cache',
-             'hint_vss', 'hint_stat', 'ssh', 'err_title']
+             'hint_vss', 'hint_stat', 'ssh', 'err_title',
+             'th_title', 'th_conn_util', 'th_tbs_free', 'th_repl_lag', 'th_locks',
+             'th_warn', 'th_crit', 'th_save', 'th_reset', 'th_saved', 'th_btn', 'th_tip',
+             'hist_btn', 'hist_tip', 'hist_live', 'hist_1h', 'hist_6h', 'hist_24h', 'hist_7d', 'hist_title',
+             'dt_overview', 'dt_conn', 'dt_slow', 'dt_tbs', 'dt_loading', 'dt_no_conn', 'dt_no_slow', 'dt_rows']
     S = {k: _t('webui.screen_' + k) for k in _keys}
     return render_template('monitor_screen.html', version=__version__, S=S)
 
@@ -6083,6 +6087,76 @@ def api_dashboard_overview():
         return jsonify(build_overview(get_screen_collector()))
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)})
+
+
+@app.route('/api/dashboard/instance/<iid>', methods=['GET'])
+def api_dashboard_instance(iid):
+    """单实例下钻明细：概览节点 + 连接/会话逐行 + 慢查询逐行。
+
+    明细由 ScreenCollector 在采集时已截顶脱敏存入快照（conn_rows/slow_rows），
+    此处直接透出，不引入新 SQL。"""
+    try:
+        from modules.monitor.screen_metrics import get_screen_collector, _build_nodes
+        c = get_screen_collector()
+        snap = c.get_snapshot()
+        if iid not in snap:
+            return jsonify({'ok': False, 'msg': 'instance not found or not yet collected',
+                            'iid': iid})
+        node = _build_nodes({iid: snap[iid]})[0]
+        return jsonify({
+            'ok': True, 'iid': iid,
+            'info': node,
+            'conn_rows': snap[iid].get('conn_rows') or [],
+            'slow_rows': snap[iid].get('slow_rows') or [],
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:300], 'iid': iid})
+
+
+@app.route('/api/dashboard/thresholds', methods=['GET'])
+def api_dashboard_thresholds():
+    """获取当前大屏告警阈值。"""
+    try:
+        from modules.monitor.screen_metrics import get_screen_collector
+        return jsonify({'ok': True, 'data': get_screen_collector().get_thresholds()})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)})
+
+
+@app.route('/api/dashboard/thresholds', methods=['POST'])
+def api_dashboard_thresholds_set():
+    """更新大屏告警阈值（运行时生效，持久化到 monitor_thresholds.json）。"""
+    try:
+        from modules.monitor.screen_metrics import get_screen_collector
+        data = request.get_json(force=True, silent=True) or {}
+        result = get_screen_collector().set_thresholds(data)
+        return jsonify({'ok': True, 'data': result})
+    except ValueError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)})
+
+
+@app.route('/api/dashboard/history/overview', methods=['GET'])
+def api_dashboard_history_overview():
+    """历史回放：按时间范围 + 时间点 at 聚合出 overview 结构（仅非敏感字段落库后回放）。"""
+    try:
+        from modules.monitor.screen_metrics import build_history_overview
+        import time as _t
+        now = _t.time()
+        to_ts = float(request.args.get('to', now))
+        span = float(request.args.get('span', 3600))
+        from_ts = float(request.args.get('from', to_ts - span))
+        at_ts = float(request.args.get('at', to_ts))
+        ov = build_history_overview(from_ts, to_ts, at_ts)
+        ov['history'] = True
+        ov['at'] = at_ts
+        ov['from'] = from_ts
+        ov['to'] = to_ts
+        return jsonify(ov)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)})
+
 
 @app.route('/api/monitor/slow-queries', methods=['GET'])
 def api_monitor_slow_queries():

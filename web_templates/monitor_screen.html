@@ -106,19 +106,39 @@
   .topo-tip b { color: var(--accent); font-size: 13px; }
   .topo-tip .muted { color: var(--tx2); }
   #detail {
-    position: absolute; right: 12px; top: 40px; width: 300px; display: none; z-index: 21;
-    background: rgba(13, 22, 40, .97); border: 1px solid var(--border); border-radius: 12px;
-    padding: 12px 14px; font-size: 12.5px; line-height: 1.85;
+    position: absolute; left: 12px; right: 12px; bottom: 12px; max-height: 48%; display: none; z-index: 30;
+    background: rgba(13, 22, 40, .98); border: 1px solid var(--border); border-radius: 12px;
+    padding: 12px 16px; font-size: 12.5px; line-height: 1.7;
+    box-shadow: 0 -10px 32px rgba(0,0,0,.5);
+    flex-direction: column; overflow: hidden;
   }
-  #detail h4 { font-size: 14px; color: var(--accent); font-weight: 600; margin-bottom: 4px; }
+  #detail-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  #detail h4 { font-size: 14px; color: var(--accent); font-weight: 600; margin: 0 44px 8px 0; }
   #detail .close {
-    position: absolute; right: 10px; top: 8px; background: none; border: none;
-    color: var(--tx2); font-size: 14px; cursor: pointer;
+    position: absolute; right: 12px; top: 10px; background: none; border: none;
+    color: var(--tx2); font-size: 15px; cursor: pointer; z-index: 2;
   }
   #detail table { width: 100%; border-collapse: collapse; }
   #detail td { padding: 1px 0; }
   #detail td:last-child { text-align: right; color: var(--tx); font-variant-numeric: tabular-nums; }
   #detail td:first-child { color: var(--tx2); }
+  .dtabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+  .dtab { flex: none; padding: 5px 18px; font-size: 12px; text-align: center; cursor: pointer;
+          color: var(--tx2); border: 1px solid transparent; border-radius: 6px; background: none; }
+  .dtab.on { color: var(--accent); border-color: var(--accent); background: rgba(56,138,221,.12); }
+  .dtab-body { flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+  .dtab-body::-webkit-scrollbar { width: 8px; height: 8px; }
+  .dtab-body::-webkit-scrollbar-track { background: transparent; }
+  .dtab-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  .dtab-body::-webkit-scrollbar-thumb:hover { background: var(--tx2); }
+  .dtab-body::-webkit-scrollbar-corner { background: transparent; }
+  .dcount { color: var(--tx2); font-size: 11px; margin-bottom: 6px; }
+  .dempty { color: var(--tx2); font-size: 12px; padding: 8px 0; }
+  .dtable { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  .dtable th, .dtable td { border: 1px solid var(--border); padding: 3px 8px; text-align: left;
+            vertical-align: top; white-space: nowrap; max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+  .dtable th { color: var(--tx2); background: rgba(255,255,255,.04); position: sticky; top: 0; z-index: 1; }
+  .dtable td.sql { white-space: pre-wrap; word-break: break-all; max-width: 420px; }
   /* ── 底栏告警 ── */
   footer {
     height: 40px; flex: none; border-top: 1px solid var(--border); background: var(--panel);
@@ -132,6 +152,8 @@
   .ticker-wrap { flex: 1; overflow: hidden; height: 100%; display: flex; align-items: center; }
   #ticker { display: inline-flex; gap: 34px; white-space: nowrap; font-size: 12.5px; will-change: transform; }
   #ticker .a-crit { color: var(--crit); } #ticker .a-warn { color: var(--warn); }
+  #ticker .alert-item { cursor: pointer; padding: 0 3px; border-radius: 4px; }
+  #ticker .alert-item:hover { background: rgba(255,255,255,.10); text-decoration: underline; }
   #ticker .empty { color: var(--tx2); }
   .probe-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
   /* ── 各面板「努力读取中」覆盖层：旋转环 + 脉动文案，数据未到时明显可见 ── */
@@ -191,6 +213,77 @@
   .trend-toggle button { background: transparent; color: var(--tx2); border: 1px solid var(--border);
     border-radius: 6px; padding: 1px 8px; margin-left: 4px; cursor: pointer; font-size: 11px; }
   .trend-toggle button.on { background: var(--accent); color: #04121E; border-color: var(--accent); font-weight: 600; }
+  /* ── 阈值设置抽屉 ── */
+  #btn-th {
+    background: var(--panel2); color: var(--tx); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 14px; font-size: 13px; cursor: pointer;
+  }
+  #btn-th:hover { border-color: var(--accent); color: var(--accent); }
+  #btn-hist {
+    background: var(--panel2); color: var(--tx); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 14px; font-size: 13px; cursor: pointer;
+  }
+  #btn-hist:hover { border-color: var(--accent); color: var(--accent); }
+  #btn-hist.on { background: var(--accent); color: #04121E; border-color: var(--accent); font-weight: 600; }
+
+  /* ── 历史回放条 ── */
+  #hist-bar {
+    position: fixed; left: 0; right: 0; top: 56px; z-index: 40;
+    display: none; align-items: center; gap: 14px;
+    padding: 8px 18px; background: rgba(11, 18, 32, .96);
+    border-bottom: 1px solid var(--border); color: var(--tx);
+    box-shadow: 0 6px 18px rgba(0,0,0,.35);
+  }
+  #hist-bar.show { display: flex; flex-wrap: wrap; }
+  #hist-bar .hist-title { font-size: 13px; font-weight: 600; color: var(--accent); }
+  #hist-bar .hist-presets button {
+    background: var(--panel2); color: var(--tx); border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; margin-right: 6px;
+  }
+  #hist-bar .hist-presets button:hover { border-color: var(--accent); color: var(--accent); }
+  #hist-bar .hist-presets button.on { background: var(--accent); color: #04121E; border-color: var(--accent); }
+  #hist-bar #hist-slider { flex: 1; min-width: 180px; accent-color: var(--accent); }
+  #hist-bar .hist-range { font-size: 12px; color: var(--tx2); font-variant-numeric: tabular-nums; }
+  #hist-bar #btn-hist-live {
+    background: var(--accent); color: #04121E; border: 1px solid var(--accent);
+    border-radius: 6px; padding: 5px 12px; font-size: 12px; cursor: pointer; font-weight: 600;
+  }
+  #hist-bar #btn-hist-live:hover { filter: brightness(1.08); }
+  #th-overlay {
+    position: fixed; inset: 0; background: rgba(3, 8, 18, .55);
+    display: none; z-index: 50;
+  }
+  #th-overlay.show { display: block; }
+  #th-panel {
+    position: fixed; top: 50%; right: 0; transform: translateY(-50%);
+    width: 360px; max-width: 92vw; max-height: 86vh; overflow-y: auto;
+    background: var(--panel); border-left: 1px solid var(--border);
+    box-shadow: -10px 0 30px rgba(0,0,0,.4); z-index: 51;
+    padding: 16px 16px 20px; color: var(--tx);
+  }
+  #th-panel h2 { font-size: 15px; margin: 0 0 4px; }
+  #th-panel .th-tip { font-size: 11px; color: var(--tx2); margin: 0 0 14px; }
+  .th-group { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px dashed var(--border); }
+  .th-group:last-of-type { border-bottom: none; }
+  .th-glabel { font-size: 12px; color: var(--tx); margin-bottom: 6px; }
+  .th-rows { display: flex; gap: 10px; }
+  .th-field { flex: 1; }
+  .th-field label { display: block; font-size: 11px; color: var(--tx2); margin-bottom: 3px; }
+  .th-field input {
+    width: 100%; box-sizing: border-box; background: var(--bg); color: var(--tx);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 13px;
+  }
+  .th-field input:focus { outline: none; border-color: var(--accent); }
+  .th-actions { display: flex; gap: 10px; margin-top: 14px; }
+  .th-actions button {
+    flex: 1; padding: 8px 0; border-radius: 8px; font-size: 13px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--panel2); color: var(--tx);
+  }
+  .th-actions .primary { background: var(--accent); color: #04201a; border-color: var(--accent); font-weight: 600; }
+  .th-actions button:hover { border-color: var(--accent); }
+  #th-msg { font-size: 12px; min-height: 16px; margin-top: 10px; }
+  #th-msg.ok { color: var(--ok); }
+  #th-msg.err { color: var(--crit); }
 </style>
 </head>
 <body>
@@ -208,11 +301,25 @@
   <div id="clock">--:--:--</div>
   <div id="freshness" class="fresh" title="">–</div>
   <button id="btn-fs" onclick="toggleFs()">{{ S.btn_fs }}</button>
+  <button id="btn-th" onclick="openSettings()" title="{{ S.th_tip }}">{{ S.th_btn }}</button>
+  <button id="btn-hist" onclick="toggleHistory()" title="{{ S.hist_tip }}">{{ S.hist_btn }}</button>
 </header>
 
 <div id="loading-bar"><span class="spin-dot"></span><span id="loading-bar-txt"></span></div>
 <div id="error-bar" class="status-bar"><span class="sb-icon">⚠</span><span id="error-bar-txt"></span></div>
 <div id="guide-bar" class="status-bar"><span class="sb-icon">ℹ</span><span id="guide-bar-txt"></span></div>
+<div id="hist-bar">
+  <span class="hist-title">{{ S.hist_title }}</span>
+  <div class="hist-presets">
+    <button onclick="setHistSpan(3600)">{{ S.hist_1h }}</button>
+    <button onclick="setHistSpan(21600)">{{ S.hist_6h }}</button>
+    <button onclick="setHistSpan(86400)">{{ S.hist_24h }}</button>
+    <button onclick="setHistSpan(604800)">{{ S.hist_7d }}</button>
+  </div>
+  <input type="range" id="hist-slider" min="0" max="1" step="1" value="1" oninput="onHistSlide()" />
+  <span id="hist-range" class="hist-range"></span>
+  <button id="btn-hist-live" onclick="exitHistory()">{{ S.hist_live }}</button>
+</div>
 
 <main>
   <aside>
@@ -247,6 +354,45 @@
   <div class="ticker-label">{{ S.ticker_label }}</div>
   <div class="ticker-wrap"><div id="ticker"></div></div>
 </footer>
+
+<div id="th-overlay" onclick="if(event.target===this)closeSettings()">
+  <div id="th-panel">
+    <h2>{{ S.th_title }}</h2>
+    <p class="th-tip">{{ S.th_tip }}</p>
+    <div class="th-group">
+      <div class="th-glabel">{{ S.th_conn_util }}</div>
+      <div class="th-rows">
+        <div class="th-field"><label>{{ S.th_warn }}</label><input id="th-warn_conn_util" type="number" step="any" min="0" max="100"></div>
+        <div class="th-field"><label>{{ S.th_crit }}</label><input id="th-crit_conn_util" type="number" step="any" min="0" max="100"></div>
+      </div>
+    </div>
+    <div class="th-group">
+      <div class="th-glabel">{{ S.th_tbs_free }}</div>
+      <div class="th-rows">
+        <div class="th-field"><label>{{ S.th_warn }}</label><input id="th-warn_tbs_free" type="number" step="any" min="0" max="100"></div>
+        <div class="th-field"><label>{{ S.th_crit }}</label><input id="th-crit_tbs_free" type="number" step="any" min="0" max="100"></div>
+      </div>
+    </div>
+    <div class="th-group">
+      <div class="th-glabel">{{ S.th_repl_lag }}</div>
+      <div class="th-rows">
+        <div class="th-field"><label>{{ S.th_warn }}</label><input id="th-warn_repl_lag" type="number" step="any" min="0"></div>
+        <div class="th-field"><label>{{ S.th_crit }}</label><input id="th-crit_repl_lag" type="number" step="any" min="0"></div>
+      </div>
+    </div>
+    <div class="th-group">
+      <div class="th-glabel">{{ S.th_locks }}</div>
+      <div class="th-rows">
+        <div class="th-field" style="flex:0 0 50%"><label>{{ S.th_warn }}</label><input id="th-warn_locks" type="number" step="1" min="0"></div>
+      </div>
+    </div>
+    <div class="th-actions">
+      <button onclick="resetThresholds()">{{ S.th_reset }}</button>
+      <button class="primary" onclick="saveThresholds()">{{ S.th_save }}</button>
+    </div>
+    <div id="th-msg"></div>
+  </div>
+</div>
 
 <script>
 'use strict';
@@ -333,16 +479,86 @@ function dbLogoHtml(t){
          '<span style="display:none;font-size:13px">' + emo + '</span>';
 }
 function fmt(n, unit){ return (n === null || n === undefined) ? '–' : n + (unit || ''); }
-function openDetailById(iid){
+var detailIid = null, detailTab = 'overview', detailCache = {};
+function openDetailById(iid, tab){
   if (!iid) return;
-  for (var i = 0; i < topoData.length; i++){
-    if (topoData[i].id === iid){
-      pinnedId = topoData[i].id;
-      document.getElementById('detail-body').innerHTML = detailHtml(topoData[i]);
-      document.getElementById('detail').style.display = 'block';
-      return;
-    }
+  detailIid = iid;
+  detailTab = tab || 'overview';
+  pinnedId = iid;
+  document.getElementById('detail').style.display = 'flex';
+  var node = null;
+  for (var i = 0; i < topoData.length; i++){ if (topoData[i].id === iid){ node = topoData[i]; break; } }
+  // 概览用 topoData 即时渲染；连接/会话、慢查询等明细异步拉取（已截顶脱敏）
+  renderDetail(node, detailCache[iid]);
+  if (!detailCache[iid]){
+    fetch('/api/dashboard/instance/' + encodeURIComponent(iid)).then(function(r){ return r.json(); })
+      .then(function(d){ if (d.ok){ detailCache[iid] = d; if (detailIid === iid) renderDetail(node, d); } })
+      .catch(function(){ /* 拉取失败则保留概览 */ });
   }
+}
+function renderDetail(node, detail){
+  var h = '<h4>' + esc(node ? node.name : detailIid) + '</h4>';
+  h += '<div class="dtabs">'
+     + dtabBtn('overview') + dtabBtn('conn') + dtabBtn('slow') + dtabBtn('tbs') + '</div>';
+  h += '<div class="dtab-body" id="dtab-body">' + renderTab(detailTab, node, detail) + '</div>';
+  document.getElementById('detail-body').innerHTML = h;
+}
+function dtabBtn(id){
+  var label = { overview: S.dt_overview, conn: S.dt_conn, slow: S.dt_slow, tbs: S.dt_tbs }[id];
+  return '<button class="dtab' + (id === detailTab ? ' on' : '') + '" onclick="switchTab(\'' + id + '\')">' + esc(label) + '</button>';
+}
+function switchTab(id){
+  detailTab = id;
+  var node = null;
+  for (var i = 0; i < topoData.length; i++){ if (topoData[i].id === detailIid){ node = topoData[i]; break; } }
+  renderDetail(node, detailCache[detailIid]);
+}
+function renderTab(tab, node, detail){
+  if (tab === 'overview') return overviewHtml(node);
+  if (tab === 'conn'){
+    var rows = detail ? detail.conn_rows : null;
+    if (!rows || !rows.length) return '<div class="dempty">' + esc(S.dt_no_conn) + '</div>';
+    return '<div class="dcount">' + rows.length + ' ' + esc(S.dt_rows) + '</div>' + rowsTableHtml(rows);
+  }
+  if (tab === 'slow'){
+    var srows = detail ? detail.slow_rows : null;
+    if (!srows || !srows.length) return '<div class="dempty">' + esc(S.dt_no_slow) + '</div>';
+    return '<div class="dcount">' + srows.length + ' ' + esc(S.dt_rows) + '</div>' + rowsTableHtml(srows);
+  }
+  if (tab === 'tbs'){
+    var tbs = (node && node.tbs) ? node.tbs : (detail && detail.info ? detail.info.tbs : null);
+    if (!tbs || !tbs.length) return '<div class="dempty">–</div>';
+    return rowsTableHtml(tbs.map(function(t){
+      return { name: t.name, total_mb: t.total_mb, free_mb: t.free_mb, free_pct: t.free_pct };
+    }));
+  }
+  return '';
+}
+function rowsTableHtml(rows){
+  if (!rows || !rows.length) return '<div class="dempty">–</div>';
+  var cols = [], seen = {};
+  rows.forEach(function(r){ Object.keys(r).forEach(function(k){ if (!seen[k]){ seen[k] = 1; cols.push(k); } }); });
+  var sqlLike = ['query','sql','sql_text','info','current_query','statement','command','text'];
+  cols.sort(function(a, b){
+    var ai = sqlLike.indexOf(a.toLowerCase()), bi = sqlLike.indexOf(b.toLowerCase());
+    if (ai >= 0 && bi < 0) return 1; if (ai < 0 && bi >= 0) return -1; return 0;
+  });
+  var h = '<table class="dtable"><thead><tr>';
+  cols.forEach(function(c){ h += '<th>' + esc(c) + '</th>'; });
+  h += '</tr></thead><tbody>';
+  rows.forEach(function(r){
+    h += '<tr>';
+    cols.forEach(function(c){
+      var cls = sqlLike.indexOf(c.toLowerCase()) >= 0 ? ' class="sql"' : '';
+      var v = r[c] == null ? '' : r[c];
+      // 浮点数取 8 位有效数字，消除 IEEE 尾差（0.037000000000000005 → 0.037）
+      if (typeof v === 'number') v = parseFloat(v.toPrecision(8));
+      h += '<td' + cls + ' title="' + esc(String(v)) + '">' + esc(v) + '</td>';
+    });
+    h += '</tr>';
+  });
+  h += '</tbody></table>';
+  return h;
 }
 var charts = {};
 function chart(id){
@@ -351,7 +567,7 @@ function chart(id){
   charts[id] = echarts.init(el);
   // 点条形 → 打开对应实例详情（数据项须带 iid）
   charts[id].on('click', function(p){
-    if (p.data && p.data.iid) openDetailById(p.data.iid);
+    if (p.data && p.data.iid) openDetailById(p.data.iid, p.data.tab);
   });
   return charts[id];
 }
@@ -486,7 +702,7 @@ function barOpt(data, color, opts){
   var names = data.map(function(d){ return d.name; });
   var barData = data.map(function(d){
     var c = opts.colorFn ? opts.colorFn(d.value) : color;
-    return { value: d.value, iid: d.id, itemStyle: { color: grad(c) },
+    return { value: d.value, iid: d.id, tab: opts.tab, itemStyle: { color: grad(c) },
              label: { color: c } };   // 数值标签与条同色，等级一眼可辨
   });
   return {
@@ -1098,9 +1314,7 @@ topo.addEventListener('click', function(e){
   }
   if (hit.kind === 'inst'){
     if (pinnedId === hit.data.id){ closeDetail(); return; }
-    pinnedId = hit.data.id;
-    document.getElementById('detail-body').innerHTML = detailHtml(hit.data);
-    document.getElementById('detail').style.display = 'block';
+    openDetailById(hit.data.id);
   }
 });
 function hitTest(mx, my){
@@ -1114,7 +1328,8 @@ function hitTest(mx, my){
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){
   return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
-function detailHtml(n){
+function overviewHtml(n){
+  if (!n) return '<div class="dempty">' + esc(S.dt_loading) + '</div>';
   var st = { ok: S.st_ok, warn: S.st_warn, crit: S.st_crit, down: S.st_down,
              pending: S.st_pending, unsupported: S.st_unsupported }[n.status];
   var rows = [
@@ -1132,7 +1347,7 @@ function detailHtml(n){
     [S.d_tbs, n.tbs_free_pct !== null && n.tbs_free_pct !== undefined ? n.tbs_free_pct + '%' : '–'],
     [S.d_cache, fmt(n.cache_hit_pct, '%')],
   ];
-  var h = '<h4>' + esc(n.name) + '</h4>';
+  var h = '';
   // 对应画布节点右上角的 ⚠ 标志：完整错误在这里展示（不截断，长句换行）
   if (n.err){
     h += '<div style="margin:2px 0 10px;padding:8px 10px;border-left:3px solid ' + C.crit +
@@ -1172,10 +1387,10 @@ function refresh(data){
   (T.sess_active || []).forEach(function(d){ saMap[d.name] = d.value; });
   var ctNames = ct.map(function(d){ return d.name; }).reverse();
   var ctV = ct.map(function(d){
-    return { value: d.value, iid: d.id, itemStyle: { color: grad(C.blue) }, label: { color: C.blue } };
+    return { value: d.value, iid: d.id, tab: 'conn', itemStyle: { color: grad(C.blue) }, label: { color: C.blue } };
   }).reverse();
   var ctS = ct.map(function(d){
-    return { value: saMap[d.name] || 0, iid: d.id, itemStyle: { color: grad(C.accent) } };
+    return { value: saMap[d.name] || 0, iid: d.id, tab: 'conn', itemStyle: { color: grad(C.accent) } };
   }).reverse();
   var connsOpt = {
     animation: false,
@@ -1207,7 +1422,7 @@ function refresh(data){
     connsOpt.xAxis.show = false; connsOpt.yAxis.show = false;
   }
   chart('c-conns').setOption(connsOpt, true);
-  setBar('c-slow', T.slowq, C.warn, { unit: '', showBg: true });
+  setBar('c-slow', T.slowq, C.warn, { unit: '', showBg: true, tab: 'slow' });
   /* 表空间：HTML 进度列表（标签完整可读 + 三档等级配色 + 点行下钻实例详情） */
   (function(){
     var el = document.getElementById('tbs-list');
@@ -1225,7 +1440,7 @@ function refresh(data){
         '<span class="val" style="color:' + c + '">' + d.value + '%</span></div>';
     }).join('');
     Array.prototype.forEach.call(el.querySelectorAll('.trow'), function(row){
-      row.addEventListener('click', function(){ openDetailById(row.getAttribute('data-iid')); });
+      row.addEventListener('click', function(){ openDetailById(row.getAttribute('data-iid'), 'tbs'); });
     });
   })();
   setBar('c-repl', T.repl_lag, C.blue, { unit: 's', showBg: true });
@@ -1280,7 +1495,8 @@ function refresh(data){
     ticker.style.transform = 'translateX(0)';
   } else {
     var seg = alerts.map(function(a){
-      return '<span class="a-' + a.level + '">[' + (a.level === 'crit' ? S.st_crit : S.st_warn) + '] ' + esc(a.name) + ' — ' + esc(a.msg) + '</span>';
+      var t = (a.level === 'crit' ? S.st_crit : S.st_warn);
+      return '<span class="alert-item a-' + a.level + '" title="' + esc(a.msg) + '" onclick="openDetailById(\'' + (a.id || '') + '\')">[' + t + '] ' + esc(a.name) + ' — ' + esc(a.msg) + '</span>';
     }).join('');
     ticker.innerHTML = seg + seg;  // 双份内容做无缝滚动
     startTicker();
@@ -1322,6 +1538,7 @@ function layoutCharts(){
 }
 
 async function poll(){
+  if (historyMode) return;   // 历史回放模式下停止实时轮询（退出时再恢复）
   try {
     var r = await fetch('/api/dashboard/overview');
     if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -1346,6 +1563,125 @@ setInterval(function(){
 function toggleFs(){
   if (document.fullscreenElement) document.exitFullscreen();
   else document.documentElement.requestFullscreen();
+}
+
+/* ── 阈值设置抽屉 ── */
+var TH_FIELDS = ['warn_conn_util','crit_conn_util','warn_tbs_free','crit_tbs_free',
+                 'warn_repl_lag','crit_repl_lag','warn_locks'];
+function openSettings(){
+  document.getElementById('th-overlay').classList.add('show');
+  var msg = document.getElementById('th-msg'); msg.textContent = ''; msg.className = '';
+  fetch('/api/dashboard/thresholds').then(function(r){ return r.json(); }).then(function(d){
+    if (!d.ok) return;
+    var t = d.data || {};
+    TH_FIELDS.forEach(function(k){
+      var el = document.getElementById('th-' + k);
+      if (el && t[k] !== undefined && t[k] !== null) el.value = t[k];
+    });
+  }).catch(function(){});
+}
+function closeSettings(){
+  document.getElementById('th-overlay').classList.remove('show');
+}
+function saveThresholds(){
+  var payload = {};
+  TH_FIELDS.forEach(function(k){
+    var el = document.getElementById('th-' + k);
+    if (el && el.value !== '') payload[k] = Number(el.value);
+  });
+  var msg = document.getElementById('th-msg');
+  msg.textContent = ''; msg.className = '';
+  fetch('/api/dashboard/thresholds', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then(function(r){ return r.json().then(function(j){ return { ok: r.ok && j.ok, j: j }; }); })
+    .then(function(res){
+      if (res.ok){ msg.textContent = S.th_saved; msg.className = 'ok'; setTimeout(closeSettings, 1200); }
+      else { msg.textContent = (res.j && res.j.error) ? res.j.error : '保存失败'; msg.className = 'err'; }
+    }).catch(function(){ msg.textContent = '保存失败（网络错误）'; msg.className = 'err'; });
+}
+function resetThresholds(){
+  if (!window.confirm(S.th_reset + '？')) return;
+  var def = { warn_conn_util:80, crit_conn_util:95, warn_tbs_free:30, crit_tbs_free:15,
+              warn_repl_lag:30, crit_repl_lag:300, warn_locks:10 };
+  TH_FIELDS.forEach(function(k){ var el = document.getElementById('th-' + k); if (el) el.value = def[k]; });
+  saveThresholds();
+}
+
+/* ── 历史回放（P2-4）：仅回放非敏感指标快照 ── */
+var historyMode = false;
+var histFrom = 0, histTo = 0, histAt = 0;
+
+function fmtTs(s){
+  if (!s) return '–';
+  var d = new Date(s * 1000);
+  var p = function(n){ return ('0' + n).slice(-2); };
+  return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+}
+
+function toggleHistory(){
+  if (historyMode) exitHistory(); else enterHistory();
+}
+
+function enterHistory(){
+  if (historyMode) return;
+  historyMode = true;
+  var now = Math.floor(Date.now() / 1000);
+  var span = 3600;                       // 默认近 1 小时
+  histTo = now; histFrom = now - span; histAt = now;
+  document.getElementById('hist-bar').classList.add('show');
+  document.getElementById('btn-hist').classList.add('on');
+  markHistPreset(span);
+  renderHistSlider();
+  loadHistory();
+}
+
+function exitHistory(){
+  if (!historyMode) return;
+  historyMode = false;
+  document.getElementById('hist-bar').classList.remove('show');
+  document.getElementById('btn-hist').classList.remove('on');
+  poll().then(scheduleNextPoll, scheduleNextPoll);   // 恢复实时轮询
+}
+
+function setHistSpan(span){
+  var now = Math.floor(Date.now() / 1000);
+  histTo = now; histFrom = now - span; histAt = now;
+  markHistPreset(span);
+  renderHistSlider();
+  loadHistory();
+}
+
+function markHistPreset(span){
+  var map = { 3600: 0, 21600: 1, 86400: 2, 604800: 3 };
+  var btns = document.querySelectorAll('#hist-bar .hist-presets button');
+  btns.forEach(function(b, i){ b.classList.toggle('on', map[span] === i); });
+}
+
+function renderHistSlider(){
+  var sl = document.getElementById('hist-slider');
+  sl.min = histFrom; sl.max = histTo; sl.step = 1; sl.value = histAt;
+  updateHistRangeLabel();
+}
+
+function onHistSlide(){
+  var sl = document.getElementById('hist-slider');
+  histAt = Number(sl.value);
+  updateHistRangeLabel();
+  loadHistory();
+}
+
+function updateHistRangeLabel(){
+  var el = document.getElementById('hist-range');
+  if (el) el.textContent = fmtTs(histFrom) + ' ~ ' + fmtTs(histTo) + '   @ ' + fmtTs(histAt);
+}
+
+function loadHistory(){
+  var url = '/api/dashboard/history/overview?from=' + histFrom + '&to=' + histTo + '&at=' + histAt;
+  fetch(url).then(function(r){ return r.json(); }).then(function(d){
+    if (!d || d.ok !== true) return;
+    refresh(d);                            // 复用实时渲染管线
+  }).catch(function(){});
 }
 
 /* 启动 */

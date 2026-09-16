@@ -28,11 +28,14 @@
 """
 
 import time
+import json
+import os
 import threading
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from modules.monitor.queries import normalize_db_type
+from modules.monitor import history_store  # 历史回放存储层（P2-4，仅非敏感白名单字段落库）
 from modules.monitor.native_collect import NATIVE_DB_TYPES, collect_native
 
 # ═══════════════════════════════════════════════════════════
@@ -331,6 +334,51 @@ def _parse_dg_lag(value):
 
 
 # ═══════════════════════════════════════════════════════════
+#  下钻明细脱敏投影（连接/会话、慢查询逐行）
+# ═══════════════════════════════════════════════════════════
+# 明细已在 MonitorEngine 采集结果中（conn_data/slow_data['data']），此处仅做
+# 截顶 + 值截断 + 剔除疑似凭据列，不引入新 SQL、不触碰数据库。
+_DRILL_MAX_ROWS = 50       # 单实例下钻明细最多透出 50 行
+_DRILL_VAL_MAX = 240       # 单行单元格值最大长度（超出截断，避免超大 SQL 文本撑爆接口）
+_DRILL_SKIP_KEYS = ('password', 'pwd', 'passwd', 'token', 'secret', 'credential')
+
+
+def _clip_val(v):
+    """非字符串值原样返回；字符串/复合值超长截断并追加省略号。"""
+    if isinstance(v, str):
+        return v[:_DRILL_VAL_MAX] + '…' if len(v) > _DRILL_VAL_MAX else v
+    if isinstance(v, (dict, list, tuple)):
+        try:
+            s = json.dumps(v, ensure_ascii=False)
+        except Exception:
+            s = str(v)
+        return s[:_DRILL_VAL_MAX] + '…' if len(s) > _DRILL_VAL_MAX else s
+    return v
+
+
+def _sanitize_rows(data, limit=_DRILL_MAX_ROWS):
+    """连接/会话/慢查询逐行 → 截顶 + 值截断 + 跳过疑似凭据列。
+
+    返回 list[dict]：键为原列名（已过滤凭据列），值为截断后的标量/字符串。
+    行结构随 db_type 不同（列名各异），前端按列动态渲染。"""
+    if not data:
+        return []
+    rows = []
+    for r in data[:limit]:
+        if not isinstance(r, dict):
+            rows.append({'_value': _clip_val(r)})
+            continue
+        clean = {}
+        for k, v in r.items():
+            kl = (str(k) or '').lower()
+            if any(w in kl for w in _DRILL_SKIP_KEYS):
+                continue
+            clean[str(k)] = _clip_val(v)
+        rows.append(clean)
+    return rows
+
+
+# ═══════════════════════════════════════════════════════════
 #  单实例采集：额外指标（QPS/TPS/缓存/容量/复制/锁）
 # ═══════════════════════════════════════════════════════════
 
@@ -616,6 +664,95 @@ class ScreenCollector:
         self._prev = {}      # iid → {'ts': float, 'counters': {...}}
         self._spark = {}     # iid → deque(qps)
         self._trend = deque(maxlen=self.TREND_POINTS)  # {'ts','qps','tps'}
+        self._load_thresholds()
+
+    # ── 阈值配置（独立于 dbc_config.json；运行时可调，持久化到 monitor_thresholds.json）──
+    # dir: up=越大越糟(warn<crit)  down=越小越糟(crit<warn)  lock=仅告警阈值
+    THRESHOLD_MAP = [
+        ('warn_conn_util', 'crit_conn_util', 'up', (0, 100)),
+        ('warn_tbs_free', 'crit_tbs_free', 'down', (0, 100)),
+        ('warn_repl_lag', 'crit_repl_lag', 'up', (0, 86400)),
+        ('warn_locks', None, 'lock', (0, 100000)),
+    ]
+
+    @staticmethod
+    def _threshold_path():
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'monitor_thresholds.json')
+
+    @staticmethod
+    def _num(v, default):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return default
+
+    def _current_threshold_dict(self):
+        d = {}
+        for wk, ck, _, _ in self.THRESHOLD_MAP:
+            d[wk] = getattr(self, wk.upper())
+            if ck is not None:
+                d[ck] = getattr(self, ck.upper())
+        return d
+
+    def _load_thresholds(self):
+        """读取 monitor_thresholds.json 覆盖默认阈值；文件缺失/损坏时回退类属性默认值。
+        首次运行（文件不存在）写入默认阈值文件。"""
+        p = self._threshold_path()
+        try:
+            if os.path.exists(p):
+                with open(p, 'r', encoding='utf-8') as f:
+                    d = json.load(f)
+                if isinstance(d, dict):
+                    for wk, ck, _, _ in self.THRESHOLD_MAP:
+                        if wk in d: setattr(self, wk.upper(), self._num(d.get(wk), getattr(self, wk.upper())))
+                        if ck is not None and ck in d: setattr(self, ck.upper(), self._num(d.get(ck), getattr(self, ck.upper())))
+        except Exception:
+            pass  # 文件异常 → 回退类属性默认值
+        if not os.path.exists(p):
+            try:
+                self._save_thresholds(self._current_threshold_dict())
+            except Exception:
+                pass
+
+    def _save_thresholds(self, d):
+        p = self._threshold_path()
+        tmp = p + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(d, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, p)
+
+    def get_thresholds(self):
+        """返回当前生效阈值（供 API GET）。"""
+        out = self._current_threshold_dict()
+        out['warn_locks'] = int(out['warn_locks'])
+        return out
+
+    def set_thresholds(self, data):
+        """校验并应用新阈值，持久化到 JSON；返回生效后的阈值 dict。
+        校验失败抛出 ValueError（含中文说明）。"""
+        cur = self._current_threshold_dict()
+        new = {}
+        for wk, ck, _, _ in self.THRESHOLD_MAP:
+            new[wk] = self._num(data.get(wk, cur[wk]), cur[wk])
+            if ck is not None:
+                new[ck] = self._num(data.get(ck, cur[ck]), cur[ck])
+        errs = []
+        if not (0 < new['warn_conn_util'] < new['crit_conn_util'] <= 100):
+            errs.append('连接利用率：须 0 < 告警阈值 < 严重阈值 ≤ 100')
+        if not (0 <= new['crit_tbs_free'] < new['warn_tbs_free'] <= 100):
+            errs.append('表空间剩余：须 0 ≤ 严重阈值 < 告警阈值 ≤ 100')
+        if not (0 <= new['warn_repl_lag'] < new['crit_repl_lag']):
+            errs.append('复制延迟：须 0 ≤ 告警阈值 < 严重阈值')
+        if new['warn_locks'] < 0:
+            errs.append('锁等待：告警阈值须 ≥ 0')
+        if errs:
+            raise ValueError('；'.join(errs))
+        for wk, ck, _, _ in self.THRESHOLD_MAP:
+            setattr(self, wk.upper(), new[wk])
+            if ck is not None:
+                setattr(self, ck.upper(), new[ck])
+        self._save_thresholds(self._current_threshold_dict())
+        return self.get_thresholds()
 
     # ── 启停 ──
     def start(self):
@@ -705,6 +842,12 @@ class ScreenCollector:
                 except Exception as e:
                     snap = self._pending_snap(inst, time.time(), err='采集线程异常: %s' % e)
                 self._commit_snap(snap)
+                # 历史回放：白名单投影后异步落库（pending 占位无真实指标，跳过；不阻塞采集热路径）
+                if snap.get('status') != 'pending':
+                    try:
+                        history_store.get_history_store().write_snap(snap)
+                    except Exception as e:
+                        print('[screen] history write failed: %s' % e, flush=True)
 
         # ── 本轮趋势点（汇总已提交快照）──
         ts = time.time()
@@ -759,6 +902,8 @@ class ScreenCollector:
             'cache_hit_pct': None, 'lock_waits': None, 'repl_lag_s': None,
             'tbs': None, 'err': None, 'status': 'ok', 'counters': {},
             'stat_hint': None,
+            # 下钻明细：连接/会话 与 慢查询 逐行（截顶脱敏，详见 _sanitize_rows）
+            'conn_rows': [], 'slow_rows': [],
             # SSH 跳板信息：用于大屏主机节点展示"经由此网关/跳板可达该实例"
             'ssh': {
                 'enabled': bool(inst.get('ssh_enabled')),
@@ -808,6 +953,9 @@ class ScreenCollector:
             snap['err'] = '监控引擎暂无该实例数据'
         sd = slow_data.get(iid)
         snap['slowq'] = len(sd.get('data') or []) if sd and not sd.get('error') else 0
+        # 下钻明细：连接/会话 与 慢查询 逐行（复用 engine 本轮采集结果，不引入新 SQL）
+        snap['conn_rows'] = _sanitize_rows(cd.get('data') if (cd and not cd.get('error')) else None)
+        snap['slow_rows'] = _sanitize_rows(sd.get('data') if (sd and not sd.get('error')) else None)
         if sd and sd.get('error') and not snap['err']:
             # 慢查询模板缺失同属能力缺失，不得作为 err 标红；
             # 但真实 SQL 失败仍要判 down（即便连接采集不支持、慢查失败是实打实的探活失败）。
@@ -872,6 +1020,7 @@ class ScreenCollector:
             'cache_hit_pct': None, 'lock_waits': None, 'repl_lag_s': None,
             'tbs': None, 'err': err, 'status': 'pending', 'counters': {},
             'stat_hint': None, 'pending': True,
+            'conn_rows': [], 'slow_rows': [],
             'ssh': {
                 'enabled': bool(inst.get('ssh_enabled')),
                 'host': inst.get('ssh_host') or '',
@@ -929,12 +1078,8 @@ def _topn(items, key, n=10):
                   key=lambda x: x[key], reverse=True)[:n]
 
 
-def build_overview(collector):
-    """把采样器快照装配成大屏一次请求所需的全部数据。"""
-    snap = collector.get_snapshot()
-    trend = collector.get_trend()
-    ts = time.time()
-
+def _build_nodes(snap):
+    """从快照装配拓扑节点（含 tbs 明细，供 TopN 表空间使用）。"""
     nodes = []
     for iid, s in snap.items():
         worst_tbs = None
@@ -950,12 +1095,22 @@ def build_overview(collector):
             'qps': s.get('qps'), 'tps': s.get('tps'),
             'cache_hit_pct': s.get('cache_hit_pct'),
             'lock_waits': s.get('lock_waits'), 'repl_lag_s': s.get('repl_lag_s'),
-            'tbs_free_pct': worst_tbs, 'spark': s.get('spark') or [],
+            'tbs': s.get('tbs'), 'tbs_free_pct': worst_tbs,
+            'spark': s.get('spark') or [],
             'stat_hint': s.get('stat_hint'),
             'ssh': s.get('ssh'),
         })
+    return nodes
 
-    # KPI
+
+def assemble_overview(nodes, collector, trend=None):
+    """把节点列表装配成大屏一次请求所需的全部数据（KPI/分组/TopN/告警/趋势）。
+
+    实时（build_overview）与历史回放（build_history_overview）共用此函数，
+    区别在于 nodes 的来源与 trend 的提供方式。"""
+    ts = time.time()
+    trend = trend if trend is not None else (collector.get_trend() if hasattr(collector, 'get_trend') else [])
+
     total = len(nodes)
     online = sum(1 for n in nodes if n['status'] in ('ok', 'warn', 'crit', 'unsupported'))
     pending = sum(1 for n in nodes if n['status'] == 'pending')
@@ -970,6 +1125,176 @@ def build_overview(collector):
         'total_tps': round(sum(n['tps'] or 0 for n in nodes), 1),
         'probe_running': collector.running,
     }
+
+    groups = {}
+    for n in nodes:
+        g = groups.setdefault(n['group'], {'name': n['group'], 'total': 0,
+                                           'ok': 0, 'warn': 0, 'crit': 0, 'down': 0})
+        g['total'] += 1
+        g[n['status']] = g.get(n['status'], 0) + 1
+
+    conn_list = [{'id': n['id'], 'name': n['name'], 'db_type': n['db_type'],
+                  'value': (n.get('conn') or {}).get('usage_pct') or 0,
+                  'detail': '%s/%s' % ((n.get('conn') or {}).get('total', 0),
+                                       (n.get('conn') or {}).get('max_conn', 0))}
+                 for n in nodes if n.get('conn')]
+    tbs_list = []
+    for n in nodes:
+        for t in (n.get('tbs') or []):
+            if t.get('free_pct') is not None:
+                tbs_list.append({'id': n['id'], 'name': '%s · %s' % (n['name'], t['name']),
+                                 'db_type': n['db_type'], 'value': t['free_pct'],
+                                 'total_mb': t.get('total_mb')})
+    tbs_worst = sorted(tbs_list, key=lambda x: x['value'])[:10]
+    repl_list = [{'id': n['id'], 'name': n['name'], 'db_type': n['db_type'],
+                  'value': n.get('repl_lag_s')} for n in nodes if n.get('repl_lag_s') is not None]
+    lock_list = [{'id': n['id'], 'name': n['name'], 'db_type': n['db_type'],
+                  'value': n.get('lock_waits')} for n in nodes if n.get('lock_waits') is not None]
+    # 连接数 / 活跃会话 TopN（连接数为主排序，会话数按实例名对齐展示）
+    conn_total_list = [{'id': n['id'], 'name': n['name'], 'db_type': n['db_type'],
+                        'value': (n.get('conn') or {}).get('total') or 0}
+                       for n in nodes if n.get('conn')]
+    sess_list = [{'id': n['id'], 'name': n['name'], 'db_type': n['db_type'],
+                  'value': (n.get('conn') or {}).get('active') or 0}
+                 for n in nodes if n.get('conn')]
+
+    topn = {
+        'qps': _topn([{'id': n['id'], 'name': n['name'], 'db_type': n['db_type'],
+                       'value': n['qps']} for n in nodes], 'value'),
+        'conn_util': _topn(conn_list, 'value'),
+        'conn_total': _topn(conn_total_list, 'value'),
+        'sess_active': _topn(sess_list, 'value'),
+        'slowq': _topn([{'id': n['id'], 'name': n['name'], 'db_type': n['db_type'],
+                         'value': n['slowq']} for n in nodes], 'value'),
+        'tbs_worst': tbs_worst,
+        'repl_lag': _topn(repl_list, 'value'),
+        'lock_wait': _topn(lock_list, 'value'),
+    }
+
+    alerts = []
+    for n in nodes:
+        if n['status'] == 'down':
+            alerts.append({'level': 'crit', 'id': n['id'], 'name': n['name'],
+                           'msg': '实例探活失败' + (('：' + n['err']) if n.get('err') else ''),
+                           'ts': n.get('ts') or ts})
+            continue
+        cu = (n.get('conn') or {}).get('usage_pct') or 0
+        if n.get('tbs_free_pct') is not None and n['tbs_free_pct'] <= collector.CRIT_TBS_FREE:
+            alerts.append({'level': 'crit', 'id': n['id'], 'name': n['name'],
+                           'msg': '表空间剩余 %.1f%%' % n['tbs_free_pct'], 'ts': ts})
+        elif n.get('tbs_free_pct') is not None and n['tbs_free_pct'] <= collector.WARN_TBS_FREE:
+            alerts.append({'level': 'warn', 'id': n['id'], 'name': n['name'],
+                           'msg': '表空间剩余 %.1f%%' % n['tbs_free_pct'], 'ts': ts})
+        if cu >= collector.CRIT_CONN_UTIL:
+            alerts.append({'level': 'crit', 'id': n['id'], 'name': n['name'],
+                           'msg': '连接利用率 %.0f%%' % cu, 'ts': ts})
+        elif cu >= collector.WARN_CONN_UTIL:
+            alerts.append({'level': 'warn', 'id': n['id'], 'name': n['name'],
+                           'msg': '连接利用率 %.0f%%' % cu, 'ts': ts})
+        lag = n.get('repl_lag_s')
+        if lag is not None and lag >= collector.WARN_REPL_LAG:
+            alerts.append({'level': 'crit' if lag >= collector.CRIT_REPL_LAG else 'warn',
+                           'id': n['id'], 'name': n['name'],
+                           'msg': '复制延迟 %ds' % lag, 'ts': ts})
+        if (n.get('lock_waits') or 0) >= collector.WARN_LOCKS:
+            alerts.append({'level': 'warn', 'id': n['id'], 'name': n['name'],
+                           'msg': '锁等待 %d' % n['lock_waits'], 'ts': ts})
+    lvl_rank = {'crit': 0, 'warn': 1}
+    alerts.sort(key=lambda a: (lvl_rank.get(a['level'], 9), -a['ts']))
+
+    return {
+        'ok': True, 'ts': ts,
+        'kpis': kpis,
+        'groups': list(groups.values()),
+        'topn': topn,
+        'trend': [{'ts': t['ts'], 'qps': t['qps']} for t in trend],
+        'alerts': alerts[:50],
+        'nodes': nodes,
+    }
+
+
+def build_overview(collector):
+    """把采样器快照装配成大屏一次请求所需的全部数据（实时）。"""
+    snap = collector.get_snapshot()
+    nodes = _build_nodes(snap)
+    return assemble_overview(nodes, collector)
+
+
+def _node_from_history_sample(s):
+    """把一条历史样本还原为与实时节点同构的 node dict。
+
+    注意：历史库仅存不透明 iid，未持久化实例名/地址；name/label/host/port
+    先回退为 iid/空，由 build_history_overview 从实时快照按 iid 关联补全。"""
+    conn = {
+        'total': s.get('conn_total'), 'max_conn': s.get('conn_max'),
+        'usage_pct': s.get('conn_usage_pct'),
+        'active': s.get('conn_active'), 'idle': s.get('conn_idle'),
+        'blocked': s.get('conn_blocked'),
+    }
+    try:
+        tbs = json.loads(s['tbs_json']) if s.get('tbs_json') else []
+    except Exception:
+        tbs = []
+    try:
+        spark = json.loads(s['spark_json']) if s.get('spark_json') else []
+    except Exception:
+        spark = []
+    return {
+        'id': s['iid'], 'name': s['iid'], 'db_type': s.get('db_type'),
+        'group': s.get('grp'), 'host': '', 'port': '', 'label': s['iid'],
+        'status': s.get('status'), 'err': None,
+        'conn': conn, 'slowq': s.get('slowq', 0),
+        'qps': s.get('qps'), 'tps': s.get('tps'),
+        'cache_hit_pct': s.get('cache_hit_pct'),
+        'lock_waits': s.get('lock_waits'), 'repl_lag_s': s.get('repl_lag_s'),
+        'tbs': tbs, 'tbs_free_pct': s.get('tbs_free_pct'),
+        'spark': spark, 'stat_hint': None,
+        'ssh': {'enabled': False, 'host': '', 'port': 22, 'user': ''},
+    }
+
+
+def build_history_overview(from_ts, to_ts, at_ts):
+    """历史回放：在 [from_ts, to_ts] 内，按 at_ts 时间点（取 ≤at 的最新样本，
+    若无则取区间内最早样本）重建各实例状态，装配为与实时同构的 overview。"""
+    hs = history_store.get_history_store()
+    samples = hs.query(from_ts=from_ts, to_ts=to_ts, limit=20000)
+
+    best = {}      # iid → ts ≤ at_ts 的最新样本
+    earliest = {}  # iid → 区间内最早样本（兜底）
+    for s in samples:
+        iid = s['iid']
+        if s['ts'] <= at_ts:
+            if iid not in best or s['ts'] > best[iid]['ts']:
+                best[iid] = s
+        if iid not in earliest or s['ts'] < earliest[iid]['ts']:
+            earliest[iid] = s
+    chosen = []
+    for iid in set(list(best.keys()) + list(earliest.keys())):
+        chosen.append(best.get(iid) or earliest.get(iid))
+    nodes = [_node_from_history_sample(c) for c in chosen if c]
+
+    # 身份字段（name/label/host/port/group/ssh）属敏感白名单之外，不入历史库；
+    # 回放时从实时快照按 iid 关联补全，保证拓扑分组/卡片命名与实时一致。
+    collector = get_screen_collector()
+    live = collector.get_snapshot() if collector else {}
+    for n in nodes:
+        s0 = live.get(n['id'])
+        if not s0:
+            continue   # 实例已删除：回退为 iid 展示
+        for k in ('name', 'label', 'host', 'port', 'group', 'ssh'):
+            v = s0.get(k)
+            if v not in (None, ''):
+                n[k] = v
+
+    # 历史趋势：按 ts 桶聚合全实例 qps 之和
+    agg = {}
+    for s in samples:
+        k = round(s['ts'])
+        agg[k] = agg.get(k, 0) + (s.get('qps') or 0)
+    trend = [{'ts': t, 'qps': round(agg[t], 1)} for t in sorted(agg)]
+
+    return assemble_overview(nodes, collector, trend=trend)
+
 
     # 分组（数据源自带 group 字段）
     groups = {}
