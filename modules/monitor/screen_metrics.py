@@ -30,7 +30,7 @@
 import time
 import threading
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from modules.monitor.queries import normalize_db_type
 from modules.monitor.native_collect import NATIVE_DB_TYPES, collect_native
@@ -676,53 +676,49 @@ class ScreenCollector:
         except Exception:
             pass
 
-        def do_one(inst):
-            return self._collect_one(engine, inst, conn_data, slow_data)
+        cur_ids = set(i['id'] for i in instances)
 
-        results = {}
-        if instances:
-            with ThreadPoolExecutor(max_workers=self.MAX_WORKERS) as pool:
-                for inst, res in zip(instances, pool.map(do_one, instances)):
-                    results[inst['id']] = res
-
-        # 提交快照 + 差值计算
-        ts = time.time()
-        total_qps, total_tps = 0.0, 0.0
+        # ── 预置 pending 占位 + 清理已删实例 ──
+        # 让拓扑与 KPI 总数在首轮采集完成前就立即有结构可渲染（打开大屏秒出基础图表）；
+        # 各实例采集完成即增量覆盖为真实快照，前端随轮询渐进填充。
         with self._lock:
-            for iid, snap in results.items():
-                prev = self._prev.get(iid)
-                if prev and snap.get('counters'):
-                    dt = max(ts - prev['ts'], 0.001)
-                    qps = self._rate(prev['counters'], snap['counters'], dt, 'qps')
-                    tps = self._rate(prev['counters'], snap['counters'], dt, 'tps')
-                    snap['qps'] = round(qps, 1) if qps is not None else None
-                    snap['tps'] = round(tps, 1) if tps is not None else None
-                    if snap.get('counters', {}).get('hit_base'):
-                        h = snap['counters'].get('hit') or 0
-                        b = snap['counters']['hit_base']
-                        snap['cache_hit_pct'] = round(h / b * 100, 1) if b else None
-                self._prev[iid] = {'ts': ts, 'counters': dict(snap.get('counters') or {})}
-                self._snap[iid] = {k: v for k, v in snap.items() if k != 'counters'}
-                if snap.get('qps') is not None:
-                    sp = self._spark.setdefault(iid, deque(maxlen=self.HISTORY))
-                    sp.append(snap['qps'])
-                    total_qps += snap['qps']
-                if snap.get('tps') is not None:
-                    total_tps += snap['tps']
-            self._trend.append({'ts': ts, 'qps': round(total_qps, 1), 'tps': round(total_tps, 1)})
-            # 清理已删除实例的残留快照：_round 只按当前实例列表写入，
-            # 不清理则 _snap/_prev/_spark 里已删实例的旧键永久残留，
-            # build_overview 遍历 _snap 会导致画布/图表上已删数据源不消失。
-            cur_ids = set(results.keys())
             for stale_iid in [k for k in self._snap if k not in cur_ids]:
                 self._snap.pop(stale_iid, None)
                 self._prev.pop(stale_iid, None)
                 self._spark.pop(stale_iid, None)
+            ts0 = time.time()
+            for inst in instances:
+                iid = inst['id']
+                if iid not in self._snap:
+                    self._snap[iid] = self._pending_snap(inst, ts0)
+
+        # ── 增量采集：每个实例一完成即写入快照（先快的后慢的，随轮询渐进显现）──
+        def do_one(inst):
+            return self._collect_one(engine, inst, conn_data, slow_data)
+
+        with ThreadPoolExecutor(max_workers=self.MAX_WORKERS) as pool:
+            futures = {pool.submit(do_one, inst): inst for inst in instances}
+            for fut in as_completed(futures):
+                inst = futures[fut]
+                try:
+                    snap = fut.result()
+                except Exception as e:
+                    snap = self._pending_snap(inst, time.time(), err='采集线程异常: %s' % e)
+                self._commit_snap(snap)
+
+        # ── 本轮趋势点（汇总已提交快照）──
+        ts = time.time()
+        with self._lock:
+            total_qps = sum((s.get('qps') or 0) for s in self._snap.values())
+            total_tps = sum((s.get('tps') or 0) for s in self._snap.values())
+            self._trend.append({'ts': ts, 'qps': round(total_qps, 1), 'tps': round(total_tps, 1)})
 
         # 告警状态机评估（锁外）：状态迁移时经通知配置发邮件/IM（异步发送）
         try:
             from modules.monitor.alert_notify import get_alert_tracker
-            get_alert_tracker().update(list(results.values()))
+            with self._lock:
+                snaps = [dict(s) for s in self._snap.values()]
+            get_alert_tracker().update(snaps)
         except Exception as e:
             print('[alert] 告警评估失败: %s' % e, flush=True)
 
@@ -858,6 +854,57 @@ class ScreenCollector:
             return 'warn'
         return 'ok'
 
+    def _pending_snap(self, inst, ts, err=None):
+        """预置占位快照：首轮采集完成前就给出实例结构与 pending 状态，
+        让拓扑与 KPI 总数立即有内容可渲染（打开大屏秒出基础图表）。"""
+        iid = inst['id']
+        db_type = (inst.get('db_type') or '').lower()
+        return {
+            'id': iid,
+            'name': inst.get('name', iid),
+            'db_type': db_type,
+            'group': inst.get('group') or 'default',
+            'host': inst.get('host', ''),
+            'port': inst.get('port', ''),
+            'label': "%s (%s:%s)" % (inst.get('name', iid), inst.get('host', '?'), inst.get('port', '?')),
+            'ts': ts,
+            'conn': None, 'slowq': 0, 'qps': None, 'tps': None,
+            'cache_hit_pct': None, 'lock_waits': None, 'repl_lag_s': None,
+            'tbs': None, 'err': err, 'status': 'pending', 'counters': {},
+            'stat_hint': None, 'pending': True,
+            'ssh': {
+                'enabled': bool(inst.get('ssh_enabled')),
+                'host': inst.get('ssh_host') or '',
+                'port': inst.get('ssh_port') or 22,
+                'user': inst.get('ssh_user') or '',
+            },
+        }
+
+    def _commit_snap(self, snap):
+        """单实例快照增量提交：计算速率（有 prev 时）+ 写入 _snap/_prev/_spark。
+        由 _round 的 as_completed 循环逐条调用，做到「谁先采完谁先显示」。"""
+        if not snap or 'id' not in snap:
+            return
+        iid = snap['id']
+        ts = snap.get('ts') or time.time()
+        with self._lock:
+            prev = self._prev.get(iid)
+            if prev and snap.get('counters'):
+                dt = max(ts - prev['ts'], 0.001)
+                qps = self._rate(prev['counters'], snap['counters'], dt, 'qps')
+                tps = self._rate(prev['counters'], snap['counters'], dt, 'tps')
+                snap['qps'] = round(qps, 1) if qps is not None else None
+                snap['tps'] = round(tps, 1) if tps is not None else None
+                if snap.get('counters', {}).get('hit_base'):
+                    h = snap['counters'].get('hit') or 0
+                    b = snap['counters']['hit_base']
+                    snap['cache_hit_pct'] = round(h / b * 100, 1) if b else None
+            self._prev[iid] = {'ts': ts, 'counters': dict(snap.get('counters') or {})}
+            self._snap[iid] = {k: v for k, v in snap.items() if k != 'counters'}
+            if snap.get('qps') is not None:
+                sp = self._spark.setdefault(iid, deque(maxlen=self.HISTORY))
+                sp.append(snap['qps'])
+
     # ── 数据读取 ──
     def get_snapshot(self):
         with self._lock:
@@ -910,12 +957,14 @@ def build_overview(collector):
 
     # KPI
     total = len(nodes)
-    online = sum(1 for n in nodes if n['status'] != 'down')
+    online = sum(1 for n in nodes if n['status'] in ('ok', 'warn', 'crit'))
+    pending = sum(1 for n in nodes if n['status'] == 'pending')
     warn = sum(1 for n in nodes if n['status'] == 'warn')
     crit = sum(1 for n in nodes if n['status'] == 'crit')
     down = sum(1 for n in nodes if n['status'] == 'down')
     kpis = {
-        'total': total, 'online': online, 'warn': warn, 'crit': crit, 'down': down,
+        'total': total, 'online': online, 'pending': pending,
+        'warn': warn, 'crit': crit, 'down': down,
         'total_conn': sum((n.get('conn') or {}).get('total') or 0 for n in nodes),
         'total_qps': round(sum(n['qps'] or 0 for n in nodes), 1),
         'total_tps': round(sum(n['tps'] or 0 for n in nodes), 1),

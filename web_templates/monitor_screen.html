@@ -49,6 +49,7 @@
   .panel {
     flex: 1; background: var(--panel); border: 1px solid var(--border);
     border-radius: 10px; display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+    position: relative;
   }
   .panel h3 {
     font-size: 12.5px; font-weight: 500; color: var(--tx2);
@@ -133,6 +134,39 @@
   #ticker .a-crit { color: var(--crit); } #ticker .a-warn { color: var(--warn); }
   #ticker .empty { color: var(--tx2); }
   .probe-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  /* ── 各面板「努力读取中」覆盖层：旋转环 + 脉动文案，数据未到时明显可见 ── */
+  .loader-overlay {
+    position: absolute; left: 0; right: 0; top: 33px; bottom: 0; z-index: 6;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 11px; background: rgba(11, 18, 32, .42); pointer-events: none;
+  }
+  .loader-overlay.hide { display: none; }
+  .loader-overlay .spinner {
+    width: 32px; height: 32px; border-radius: 50%;
+    border: 3px solid rgba(255, 255, 255, .12);
+    border-top-color: var(--accent); border-right-color: rgba(0, 200, 160, .35);
+    animation: spin .85s linear infinite;
+  }
+  .loader-overlay .loader-txt {
+    font-size: 12px; color: var(--tx2); letter-spacing: .4px;
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+  /* ── 全局「努力读取监控数据」横幅：顶部居中，明显提示数据加载中 ── */
+  #loading-bar {
+    position: absolute; top: 58px; left: 50%; transform: translateX(-50%);
+    z-index: 45; display: none; align-items: center; gap: 9px;
+    background: rgba(13, 22, 40, .96); border: 1px solid var(--accent);
+    color: var(--tx); font-size: 12.5px; padding: 6px 16px; border-radius: 20px;
+    box-shadow: 0 6px 22px rgba(0, 0, 0, .55);
+  }
+  #loading-bar.show { display: flex; }
+  #loading-bar .spin-dot {
+    width: 13px; height: 13px; border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, .22); border-top-color: var(--accent);
+    animation: spin .8s linear infinite;
+  }
 </style>
 </head>
 <body>
@@ -150,6 +184,8 @@
   <div id="clock">--:--:--</div>
   <button id="btn-fs" onclick="toggleFs()">{{ S.btn_fs }}</button>
 </header>
+
+<div id="loading-bar"><span class="spin-dot"></span><span id="loading-bar-txt"></span></div>
 
 <main>
   <aside>
@@ -190,7 +226,8 @@
 /* ══════════════ 基础 ══════════════ */
 var S = {{ S | tojson }};
 var C = { bg:'#0B1220', panel:'#0E1626', border:'#1C2A44', tx:'#D7E1F0', tx2:'#8FA3C0',
-          accent:'#00C8A0', blue:'#38BDF8', ok:'#22C55E', warn:'#F59E0B', crit:'#EF4444', down:'#6B7280' };
+          accent:'#00C8A0', blue:'#38BDF8', ok:'#22C55E', warn:'#F59E0B', crit:'#EF4444',
+          down:'#6B7280', pending:'#7C8699' };
 var TYPE_META = {
   mysql:['My','#0891B2'], mariadb:['Ma','#0E7490'], oceanbase:['OB','#2563EB'], tidb:['Ti','#DC2626'],
   postgresql:['Pg','#4F46E5'], pg:['Pg','#4F46E5'], ivorysql:['IV','#7C3AED'], kingbase:['KB','#6366F1'],
@@ -292,6 +329,94 @@ function chart(id){
   return charts[id];
 }
 var BASE_GRID = { left: 6, right: 48, top: 8, bottom: 4, containLabel: true };
+/* ── 数据预热（warming-up）状态机 ──
+   打开大屏到后端首轮真实采集完成前，所有面板显示「正在努力读取数据…」动画
+   覆盖层 + 顶部全局横幅。一旦任一实例采集完成（status 不再是 pending），或
+   超过 30s 仍未就绪，即结束预热、隐藏动画；空面板回落显示「暂无数据」。 */
+var warmingUp = true;
+var WARM_TIMEOUT = 30000;
+var warmTimer = setTimeout(endWarming, WARM_TIMEOUT);
+
+function endWarming(){
+  warmingUp = false;
+  clearTimeout(warmTimer);
+  hideGlobalLoading();
+  Object.keys(loaders).forEach(function(id){ loaders[id].classList.add('hide'); });
+}
+function showGlobalLoading(){
+  var bar = document.getElementById('loading-bar');
+  if (!bar) return;
+  document.getElementById('loading-bar-txt').textContent = S.loading_banner;
+  bar.classList.add('show');
+}
+function hideGlobalLoading(){
+  var bar = document.getElementById('loading-bar');
+  if (bar) bar.classList.remove('show');
+}
+/* 面板加载覆盖层：spinner + 脉动文案；数据未到时明显可见 */
+var loaders = {};
+function ensureLoader(id){
+  var el = document.getElementById(id);
+  if (!el || loaders[id]) return loaders[id];
+  var panel = el.parentNode;
+  var ov = document.createElement('div');
+  ov.className = 'loader-overlay';
+  ov.innerHTML = '<div class="spinner"></div><div class="loader-txt">' + S.loading_hard + '</div>';
+  panel.appendChild(ov);
+  loaders[id] = ov;
+  return ov;
+}
+function hideLoader(id){ if (loaders[id]) loaders[id].classList.add('hide'); }
+function showLoader(id){ if (loaders[id]) loaders[id].classList.remove('hide'); }
+
+/* 面板是否已取到真实数据（用于决定是否隐藏加载层） */
+function panelHasData(id, data){
+  var T = data.topn || {};
+  switch (id){
+    case 'c-qps':    return (T.qps || []).length > 0;
+    case 'c-conn':   return (T.conn_util || []).length > 0;
+    case 'c-conns':  return (T.conn_total || []).length > 0;
+    case 'c-trend':  return (data.trend || []).length > 0;
+    case 'c-repl':   return (T.repl_lag || []).length > 0;
+    case 'c-lock':   return (T.lock_wait || []).length > 0;
+    case 'c-slow':   return (T.slowq || []).length > 0;
+    case 'c-health': return (data.nodes || []).length > 0;
+    case 'tbs-list': return (T.tbs_worst || []).length > 0;
+    case 'topo':     return (data.nodes || []).length > 0;
+  }
+  return false;
+}
+/* 每次 refresh 后更新加载层：取到数 / 预热结束仍空 → 隐藏；预热中且空 → 继续显示 */
+function updateLoaders(data){
+  var nodes = data.nodes || [];
+  var real = nodes.filter(function(n){ return n.status && n.status !== 'pending'; });
+  if (real.length) endWarming();
+  if (!warmingUp) hideGlobalLoading();
+  ['c-qps','c-conn','c-conns','c-trend','c-repl','c-lock','c-slow','c-health','tbs-list','topo']
+    .forEach(function(id){
+      if (panelHasData(id, data) || !warmingUp) hideLoader(id);
+      else showLoader(id);
+    });
+}
+
+/* 页面加载即初始化所有 ECharts 面板为「加载中…」占位 + 加载动画覆盖层，
+   保证打开大屏时基础图表面板（标题 + 占位结构 + 努力读取动画）立即可见。 */
+function initCharts(){
+  ['c-qps','c-conn','c-conns','c-trend','c-repl','c-lock','c-slow','c-health'].forEach(function(id){
+    try {
+      var c = chart(id);
+      c.setOption({
+        backgroundColor: 'transparent',
+        graphic: [{ type: 'text', left: 'center', top: 'middle',
+          style: { text: S.loading, fill: C.tx2, fontSize: 12 } }]
+      }, true);
+      ensureLoader(id);
+    } catch (e) { /* 面板尚未就绪时静默跳过，待首个 refresh 重建 */ }
+  });
+  ensureLoader('tbs-list');
+  ensureLoader('topo');
+  showGlobalLoading();
+}
 var TIP_STYLE = {
   backgroundColor: '#131E33', borderColor: C.border, borderWidth: 1,
   textStyle: { color: C.tx, fontSize: 12 },
@@ -368,6 +493,7 @@ function resizeCanvas(){
 window.addEventListener('resize', function(){ fittedForCount = -1; resizeCanvas(); layoutCharts(); });
 
 function statusColor(s){
+  if (s === 'pending') return C.pending;   // 检测中：浅灰蓝，与 down 深灰区分
   return s === 'down' ? C.down : s === 'crit' ? C.crit : s === 'warn' ? C.warn : C.ok;
 }
 
@@ -695,7 +821,10 @@ function drawTopo(){
       ctx.strokeStyle = col; ctx.lineWidth = 1;
       rr(p.x, p.y, instW, instH, 6); ctx.fill(); ctx.stroke();
       // 第1行：状态灯 + 数据库真实 logo（白底圆角章，深色卡片上任何 logo 都清晰）+ 名称
-      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(p.x + 12, p.y + 15, 3.5, 0, 6.3); ctx.fill();
+      ctx.fillStyle = col;
+      if (n.status === 'pending') ctx.globalAlpha = 0.45 + 0.45 * Math.sin(flowT * 4);  // 检测中：呼吸闪烁
+      ctx.beginPath(); ctx.arc(p.x + 12, p.y + 15, 3.5, 0, 6.3); ctx.fill();
+      ctx.globalAlpha = 1;
       var logo = dbLogoImg(n.db_type), chipW = logo ? logoChipW(logo) : 20;
       if (logo){
         ctx.fillStyle = 'rgba(255,255,255,.92)';
@@ -733,7 +862,7 @@ function drawTopo(){
       }
       ctx.restore();
       // 第2行：状态 + 连接数
-      var stx = { ok: S.st_ok, warn: S.st_warn, crit: S.st_crit, down: S.st_down }[n.status];
+      var stx = { ok: S.st_ok, warn: S.st_warn, crit: S.st_crit, down: S.st_down, pending: S.st_pending }[n.status];
       ctx.font = '10px sans-serif';
       ctx.fillStyle = C.tx2; ctx.fillText(S.node_status, p.x + 12, p.y + 35);
       ctx.fillStyle = col;   ctx.fillText(stx, p.x + 34, p.y + 35);
@@ -855,7 +984,8 @@ function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c
   return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
 function detailHtml(n){
-  var st = { ok: S.st_ok, warn: S.st_warn, crit: S.st_crit, down: S.st_down }[n.status];
+  var st = { ok: S.st_ok, warn: S.st_warn, crit: S.st_crit, down: S.st_down,
+             pending: S.st_pending, unsupported: S.st_unsupported }[n.status];
   var rows = [
     [S.d_status, '<span style="color:' + statusColor(n.status) + '">' + st + '</span>'],
     [S.d_type, dbLogoHtml(n.db_type) + ' ' + esc(n.db_type) + ' / ' + esc(n.group)],
@@ -996,15 +1126,17 @@ function refresh(data){
   }
   chart('c-trend').setOption(trendOpt, true);
 
-  var cnt = { ok: 0, warn: 0, crit: 0, down: 0 };
+  var cnt = { ok: 0, warn: 0, crit: 0, down: 0, pending: 0, unsupported: 0 };
   (data.nodes || []).forEach(function(n){ cnt[n.status] = (cnt[n.status] || 0) + 1; });
   var healthData = [
     { name: S.st_ok,   value: cnt.ok,   itemStyle: { color: C.ok,   shadowBlur: 8, shadowColor: C.ok + '55' } },
     { name: S.st_warn, value: cnt.warn, itemStyle: { color: C.warn, shadowBlur: 8, shadowColor: C.warn + '55' } },
     { name: S.st_crit, value: cnt.crit, itemStyle: { color: C.crit, shadowBlur: 8, shadowColor: C.crit + '55' } },
+    { name: S.st_pending, value: cnt.pending, itemStyle: { color: C.pending, shadowBlur: 8, shadowColor: C.pending + '55' } },
+    { name: S.st_unsupported, value: cnt.unsupported, itemStyle: { color: C.tx2, shadowBlur: 8, shadowColor: C.tx2 + '55' } },
     { name: S.st_down, value: cnt.down, itemStyle: { color: C.down, shadowBlur: 8, shadowColor: C.down + '55' } }
   ].filter(function(d){ return d.value > 0; });
-  var hTotal = cnt.ok + cnt.warn + cnt.crit + cnt.down;
+  var hTotal = cnt.ok + cnt.warn + cnt.crit + cnt.pending + cnt.unsupported + cnt.down;
   var healthOpt = {
     animation: false,
     tooltip: Object.assign({ trigger: 'item',
@@ -1092,12 +1224,20 @@ function toggleFs(){
 }
 
 /* 启动 */
+var pollStartedAt = Date.now();
+/* 首屏提速：打开大屏立即初始化所有 ECharts 占位面板，拓扑/标题秒出；
+   首个 24s 内轮询间隔 2s（尽快填充真实数据），之后回到 15s 稳态。 */
+function scheduleNextPoll(){
+  var elapsed = Date.now() - pollStartedAt;
+  var delay = elapsed < 24000 ? 2000 : 15000;
+  setTimeout(function(){ poll().then(scheduleNextPoll, scheduleNextPoll); }, delay);
+}
 loadDBLogos();
+initCharts();          // 页面加载即初始化所有 ECharts 占位面板（秒出基础结构）
 resizeCanvas();
+layoutCharts();
 frame();
-poll();
-setInterval(poll, 5000);
-setTimeout(layoutCharts, 300);
+poll().then(scheduleNextPoll, scheduleNextPoll);
 </script>
 </body>
 </html>
