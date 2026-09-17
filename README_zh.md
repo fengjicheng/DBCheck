@@ -1,1009 +1,1326 @@
-﻿# RaccoonX
-🚀 **开源智能数据库检测与健康分析平台**
+﻿# 🦝 RaccoonX
 
 ![RaccoonX Logo](snapshot/dbcheck_logo_info.png)
 
-RaccoonX是一个 **Apache License 2.0 许可的开源数据库检查和健康分析平台**。
+### 开源智能数据库巡检与运维平台
 
-它帮助数据库管理员（DBA）、开发人员和操作团队自动检查数据库，发现潜在风险，分析性能问题，并生成标准化的健康检查报告。
-
-RaccoonX 支持多个关系数据库、文档数据库和KV数据库。
-
-通过自动检查规则、系统资源收集、人工智能辅助诊断和可扩展插件，RaccoonX帮助团队构建更可靠、更高效的数据库操作流程。
-
-> 本项目中显示的第三方软件名称、徽标、商标、徽章和相关资产属于其各自的所有者。它们的出现仅表示兼容或支持，并不意味着任何从属关系或合作关系。
-
-> 官网：[https://dbcheck.top](https://dbcheck.top) 
-> 
-> 邮箱：sdfiyon@gmail.com
-> 
-Language switch（语言切换）: [English](./README.md) | [中文](./README_zh.md)
-
-[![Version](https://img.shields.io/badge/版本-v26.9.3-blue.svg)]()
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)]()
-[![Open Source](https://img.shields.io/badge/Open%20Source-Yes-green.svg)]()
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)]()
-[![AI](https://img.shields.io/badge/AI-Ollama+OpenAI-orange.svg)]()
-[![RAG](https://img.shields.io/badge/知识库增强-RAG-red.svg)]()
-[![WebUI](https://img.shields.io/badge/WebUI-Flask-success.svg)]()
-[![WeChat](https://img.shields.io/badge/公众号-山东Oracle用户组-brightgreen?logo=WeChat)]()
-[![WebSite](https://img.shields.io/badge/网址-www.dbcheck.top-green.svg)](https://dbcheck.top)
-[![Docker Pulls](https://img.shields.io/docker/pulls/jackge12345/dbcheck?style=flat-square&label=Docker%20Pulls&cacheSeconds=300)](https://hub.docker.com/r/jackge12345/dbcheck)
-![Downloads](https://img.shields.io/github/downloads/fiyo/DBCheck/total?style=flat-square&label=Source+Downloads)
-
----
-
-## 💝 支持 RaccoonX（赞助）
-
-如果 RaccoonX 对你的数据库工作有帮助，欢迎支持它的持续开发。每一份支持都是开源前行的动力 ❤️
-
-<img src="snapshot/pay.png" alt="赞助二维码" width="600" />
-
-> 微信 / 支付宝扫码赞助 · 赞助时请备注姓名或昵称 ❤️
+> **RaccoonX** 是一个开源、跨平台的数据库巡检与运维平台，面向 DBA、数据库工程师、DevOps 团队与基础设施团队。
 >
-> 完整支持者名单见页面底部 [社区支持者](#社区支持者)。
+> 项目**原名 DBCheck**。
 
-## 🦝 品牌故事
+[![Version](https://img.shields.io/badge/Version-v26.8.7.1-blue.svg)]()
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)]()
+[![AI](https://img.shields.io/badge/AI-Ollama%20%7C%20OpenAI-orange.svg)]()
+[![RAG](https://img.shields.io/badge/RAG-知识库-red.svg)]()
+[![WebUI](https://img.shields.io/badge/WebUI-Flask-success.svg)]()
+[![Docker Pulls](https://img.shields.io/docker/pulls/jackge12345/dbcheck?style=flat-square\&label=Docker%20Pulls\&cacheSeconds=300)](https://hub.docker.com/r/jackge12345/dbcheck)
+[![GitHub Stars](https://img.shields.io/github/stars/fiyo/DBCheck?style=flat-square\&label=Stars)](https://github.com/fiyo/DBCheck/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/fiyo/DBCheck?style=flat-square\&label=Forks)](https://github.com/fiyo/DBCheck/network/members)
 
-本平台**原名 DBCheck**，现已完成品牌升级，新名称为 **RaccoonX**，中文名 **「浣巡」**——浣巡（RaccoonX）智能巡检与健康分析平台。
+> 🐳 **25,000+ Docker 镜像拉取**
+> 🗄️ **21+ 数据库类型**
+> 🔍 **330+ 巡检规则**
+> 🤖 **AI 辅助诊断**
+> 🔌 **可扩展插件架构**
+> 📜 **Apache License 2.0**
 
-**为什么是小浣熊？**
+如果 RaccoonX 对你有帮助，欢迎给仓库点一个 ⭐。
 
-- **Raccoon（小浣熊）** 天生具有「探索、翻找、发现隐藏问题」的属性，这正是数据库巡检要做的事。
-- 浣熊有 **「夜行」** 的特点，契合 DBA 夜间救火、巡检服务器的真实场景。
-- 浣熊 **聪明、好奇、工具感强**，符合 AI 运维助手的定位。
-- 相比机器人，浣熊 **更有亲和力**，更适合开源社区的传播。
-
-**X 代表什么？**
-
-- **eXplore（探索）**
-- **eXpert（专家）**
-- **eXtensible（可扩展）**
-
-> 过渡期内，项目仓库、Docker 镜像、官网域名等仍沿用原 **DBCheck** 标识，内部代号保持 `dbcheck` 不变。
-
----
-
-# 为什么选择 RaccoonX？
-
-
-现代应用系统高度依赖数据库。
-
-然而数据库日常运维仍然大量依赖：
-
-- 人工经验
-- 手工检查
-- 临时排查
-- 分散的监控工具
-
-
-这些方式存在：
-
-- 检查标准不统一
-- 问题发现不及时
-- 故障定位困难
-- 运维经验难以沉淀
-
-
-RaccoonX 希望打造一个：
-
-> **开源、智能、可扩展的数据库健康管理平台。**
-
-
-帮助团队：
-
-✅ 提前发现数据库风险  
-✅ 标准化数据库巡检流程  
-✅ 降低重复运维工作  
-✅ 提升故障定位效率  
-✅ 利用 AI 沉淀数据库运维知识  
-
+一个 Star 能让更多数据库工程师发现这个项目，也是支持独立开源项目最简单的方式。
 
 ---
 
-# ✨ 核心功能
+## 🌐 项目链接
 
-
-## 🗄️ 多数据库支持
-
-
-RaccoonX 支持超过 20 种数据库系统：
-
-包括：
-
-- MySQL
-- MariaDB
-- PostgreSQL
-- Oracle
-- SQL Server
-- 达梦 DM8
-- TiDB
-- OceanBase
-- KingbaseES
-- 瀚高数据库 HGDB
-- 南大通用 GBase
-- MongoDB
-- DB2
-- Redis
-- ClickHouse
-
-以及更多数据库类型。
-
+* **官网：** https://raccoonx.cn/
+* **GitHub：** https://github.com/fiyo/DBCheck
+* **Docker Hub：** https://hub.docker.com/r/jackge12345/dbcheck
+* **English：** [README.md](./README.md)
+* **中文：** [README_zh.md](./README_zh.md)
+* **Issues：** https://github.com/fiyo/DBCheck/issues
+* **Discussions：** https://github.com/fiyo/DBCheck/discussions
 
 ---
 
-## 📋 自动化数据库巡检
+# 🦝 为什么选择 RaccoonX？
 
+数据库环境正变得越来越复杂。
 
-RaccoonX 自动采集数据库运行状态，包括：
+一套典型的生产环境可能同时包含：
 
+* MySQL
+* PostgreSQL
+* Oracle
+* SQL Server
+* 达梦 DM8
+* TiDB
+* OceanBase
+* Redis
+* MongoDB
+* ClickHouse
+* 以及更多其它数据库系统。
 
-### 基础信息
+传统的数据库巡检往往依赖手工执行 SQL 脚本、检查操作系统资源、截图留存、分析慢 SQL，再人工撰写巡检报告。
 
-- 数据库版本
-- 实例信息
-- 数据库状态
-- 连接信息
+RaccoonX 希望把这些工作整合到一个开源平台里。
 
+### RaccoonX 帮助你：
 
-### 性能指标
+```text
+连接
+   ↓
+巡检
+   ↓
+采集
+   ↓
+分析
+   ↓
+识别风险
+   ↓
+生成报告
+   ↓
+跟踪变化
+   ↓
+AI 辅助诊断
+```
 
-- CPU
-- 内存
-- IO
-- 会话
-- SQL 性能
+它既可以作为独立的数据库巡检工具使用，也可以融入更完整的数据库运维工作流。
 
+---
 
-### 配置检查
+# 📊 项目里程碑
 
-- 参数配置
-- 安全策略
-- 容量配置
-- 最佳实践基线
+RaccoonX 前身是 **DBCheck**，在持续开发与社区反馈中不断演进。
 
+| 里程碑             |         现状 |
+| ------------------ | -------------: |
+| Docker 镜像拉取       |    **25,000+** |
+| GitHub Stars       |       **166+** |
+| GitHub Forks       |        **57+** |
+| 数据库类型             |        **21+** |
+| 巡检规则               |       **330+** |
+| 界面语言               |          **9** |
+| 开源协议               | **Apache 2.0** |
 
-### 数据库健康检查
+Docker 拉取次数代表镜像拉取量，不应解读为独立用户数或安装数。
 
-- 锁等待
-- 死锁分析
-- 慢 SQL
-- 索引健康
-- 表空间
-- 备份状态
+### ⭐ 帮我们到达下一个里程碑
 
+如果你用过 RaccoonX、测试过它、从它学到过东西，或者单纯觉得这个项目有意思：
 
-自动生成：
+**给它一个 Star。**
 
-- Word 巡检报告
-- 风险分析
-- 优化建议
-- 历史趋势对比
+```text
+25,000+ Docker Pulls
+        ↓
+     持续构建
+        ↓
+   ⭐ Star RaccoonX
+```
 
+---
+
+# ✨ 功能一览
+
+| 功能                         | 说明                                                                 |
+| ---------------------------- | -------------------------------------------------------------------- |
+| 🗄️ 数据源管理                 | 统一管理数据库实例，支持分组、批量巡检、CSV 导入导出                     |
+| 📋 数据库巡检                 | 21+ 数据库类型、330+ 巡检规则，自动生成 Word 报告                     |
+| 🔌 插件系统                   | 独立的插件生命周期、插件数据、模板、基线与规则                        |
+| 🔍 慢查询分析                 | 执行计划、I/O 模式、锁等待与 AI 辅助分析                              |
+| 🔒 锁诊断                     | 阻塞链、死锁、长事务与处置建议                                        |
+| 📊 索引健康                   | 缺失、冗余与长期未使用索引分析                                        |
+| ⚙️ 配置基线                   | 将数据库参数与可配置的推荐值对比                                      |
+| 📈 历史趋势                   | 多轮巡检历史、趋势与前后对比                                          |
+| 🤖 AI 诊断                    | 本地 Ollama 或兼容云端 API 的 AI 辅助分析                             |
+| 💬 AI 对话巡检                | 以自然语言与巡检系统交互                                              |
+| 📡 实时监控                   | 连接、延迟、吞吐与可用性监控                                          |
+| 🖥️ 服务器巡检                | CPU、内存、磁盘、网络、服务与进程                                     |
+| 🔗 分享报告                   | 生成免登录即可查看的报告链接                                          |
+| ⏰ 定时任务                   | 基于 Cron 的巡检调度，支持邮件/Webhook 通知                           |
+| 📚 RAG 知识库                 | 上传运维文档，用于 AI 辅助诊断                                        |
+| 📊 Oracle AWR 分析            | 解析 Oracle AWR HTML 报告并生成结构化报告                             |
+| 💿 DM8 离线存储检查           | 无需启动数据库即可分析 DM8 数据文件                                   |
+| 📝 SQL 编辑器                 | 交互式 SQL 编辑器，语法高亮与执行历史                                 |
+| 🖥️ 远程终端                  | 基于 SSH 的终端，多标签页与全屏模式                                   |
+| 💾 容灾备份                   | 数据库/文件的定时备份，含保留清理与健康跟踪                           |
+| 🌍 多语言界面                 | 简体中文、English、繁體中文、日本語、한국어、Español、Français、Deutsch、Русский |
+
+---
+
+# 🗄️ 支持的数据库
+
+RaccoonX 目前支持 **21+ 数据库与数据系统**。
+
+| 数据库        | 驱动                    | 默认端口 | 说明                       |
+| ------------- | ----------------------- | -----------: | -------------------------- |
+| MySQL         | pymysql                 |         3306 | 5.6 / 5.7 / 8.0+           |
+| MariaDB       | pymysql                 |         3306 | 10.3+                      |
+| PostgreSQL    | psycopg2                |         5432 | 10+                        |
+| Oracle        | oracledb                |         1521 | 11g R2 / 12c / 19c / 21c+  |
+| Oracle (JDBC) | JPype1 + ojdbc          |         1521 | Oracle JDBC 连接           |
+| SQL Server    | pyodbc + ODBC Driver 17 |         1433 | 2012+                      |
+| 达梦 DM8      | dmpython                |         5236 | 国产数据库                 |
+| TiDB          | pymysql                 |         4000 | MySQL 协议                 |
+| IvorySQL      | psycopg2                |         5333 | PostgreSQL 兼容            |
+| 崖山 YashanDB | yashandb                |         1688 | Oracle 兼容                |
+| 人大金仓 KingbaseES | psycopg2          |        54321 | PostgreSQL 兼容            |
+| 南大通用 GBase 8s | JDBC                |         9088 | JDK + JDBC                 |
+| 优炫 UXDB     | JDBC                    |        33060 | PostgreSQL 兼容            |
+| 瀚高 HGDB     | JDBC                    |         5866 | PostgreSQL 兼容            |
+| MongoDB       | pymongo                 |        27017 | 4.0+                       |
+| DB2 LUW       | JDBC                    |        50000 | 11.5+ / 12.x               |
+| OceanBase     | pymysql                 |         2881 | MySQL 租户                 |
+| TDSQL-C MySQL | pymysql                 |         3306 | MySQL 兼容                 |
+| Redis         | redis-py                |         6379 | 3.0+                       |
+| Redis 集群    | redis-py                |         6379 | 集群拓扑与槽位             |
+| ClickHouse    | JDBC                    |         8123 | 21.8+                      |
+
+> **Oracle JDBC**
+>
+> Oracle JDBC 是基于 JPype 与 Oracle JDBC 驱动的独立插件，适合无法安装 Oracle Instant Client 的环境。
+
+---
+
+# 🚀 快速开始
+
+## 🐳 Docker — 推荐
+
+Docker 是启动 RaccoonX 最简单的方式。
+
+### Docker Hub
+
+```bash
+docker pull jackge12345/dbcheck:latest
+
+docker run -d \
+  -p 5003:5003 \
+  -v dbcheck_data:/app/data \
+  -v dbcheck_reports:/app/reports \
+  --name dbcheck \
+  jackge12345/dbcheck:latest
+```
+
+### GitHub Container Registry
+
+```bash
+docker pull ghcr.io/fiyo/dbcheck:latest
+
+docker run -d \
+  -p 5003:5003 \
+  -v dbcheck_data:/app/data \
+  -v dbcheck_reports:/app/reports \
+  --name dbcheck \
+  ghcr.io/fiyo/dbcheck:latest
+```
+
+打开：
+
+```text
+http://localhost:5003
+```
+
+默认账号为 `admin`，密码为 `admin123`（首次登录后请及时修改密码）。
+
+### docker-compose
+
+```bash
+curl -o deploy/docker-compose.yml \
+  https://raw.githubusercontent.com/fiyo/DBCheck/main/deploy/docker-compose.yml
+
+docker compose -f deploy/docker-compose.yml up -d
+```
+
+> **GBase 8s**
+>
+> Docker 镜像已内置所需的 JDK 与 JDBC 驱动，通过镜像运行 GBase 8s 无需额外安装驱动。
+
+---
+
+# 💻 源码安装
+
+## 环境要求
+
+* Python 3.10+
+* Git
+* 各数据库对应的 Python 驱动
+* 按需安装额外的 JDBC / ODBC 依赖
+
+克隆仓库：
+
+```bash
+git clone https://github.com/fiyo/DBCheck.git
+cd DBCheck
+```
+
+安装依赖：
+
+```bash
+pip install -r deploy/requirements.txt
+```
+
+启动 Web UI：
+
+```bash
+python web_ui.py
+```
+
+打开：
+
+```text
+http://localhost:5003
+```
+
+---
+
+## CLI 模式
+
+中文界面：
+
+```bash
+python -m entrypoints.cli
+```
+
+英文界面：
+
+```bash
+python -m entrypoints.cli --lang en
+```
+
+Web 界面：
+
+```bash
+python web_ui.py
+```
+
+---
+
+# 🔍 数据库巡检
+
+RaccoonX 提供配置驱动的数据库巡检。
+
+巡检引擎采集数据库元数据、配置、性能信息、资源使用与安全相关信息，并依据巡检规则进行评估。
+
+典型流程：
+
+```text
+数据库
+   │
+   ├── 连接
+   │
+   ├── 元数据
+   │
+   ├── 配置
+   │
+   ├── 性能
+   │
+   ├── 会话
+   │
+   ├── 锁
+   │
+   ├── 存储
+   │
+   ├── 安全
+   │
+   └── SQL
+          ↓
+     巡检引擎
+          ↓
+     风险分析
+          ↓
+      优化建议
+          ↓
+     Word 报告
+```
+
+---
+
+# 📋 巡检覆盖
+
+RaccoonX 内置各数据库专属的巡检模板。
+
+典型巡检维度包括：
+
+| 维度         | 覆盖内容                                        |
+| ----------------- | ----------------------------------------------- |
+| 基本信息     | 版本、实例、数据库信息                          |
+| 会话         | 活跃会话与连接使用情况                          |
+| 内存         | 内存配置与利用率                                |
+| 存储         | 表空间、文件与容量                              |
+| 配置         | 重要数据库参数                                  |
+| 安全         | 用户、权限与安全配置                            |
+| SQL          | Top SQL 与慢查询                                |
+| 锁           | 阻塞会话与锁等待                                |
+| 复制         | 支持场景下的复制 / Data Guard 状态              |
+| 备份         | 备份就绪度与相关配置                            |
+| 统计信息     | 对象与优化器统计                                |
+| 性能         | 数据库性能指标                                  |
+| 可用性       | 数据库与服务状态                                |
+
+具体覆盖范围因数据库类型而异。
+
+---
+
+# 📊 Word 巡检报告
+
+RaccoonX 可以自动生成结构化的 Word 巡检报告。
+
+典型的 Oracle 报告包含：
+
+| 章节         | 内容                                                                     |
+| ------------ | ------------------------------------------------------------------------ |
+| 封面         | 数据库名、版本、主机、巡检人与时间戳                                     |
+| 第 1 章      | OS 主机信息                                                              |
+| 第 2 章      | 数据库基本信息                                                           |
+| 第 3 章      | 表空间                                                                   |
+| 第 4 章      | SGA / PGA                                                                |
+| 第 5 章      | 关键参数                                                                 |
+| 第 6–19 章   | Undo、Redo、归档、DG、RAC、ASM、会话、性能、安全等                       |
+| 第 20 章     | 风险与建议                                                               |
+| 第 21 章     | AI 诊断建议                                                              |
+| 第 22 章     | 报告说明                                                                 |
+
+报告章节可通过 Web UI 自由配置。
+
+---
+
+# ⚠️ 智能风险分析
+
+RaccoonX 依据可配置的巡检规则评估采集到的信息。
+
+一条风险项可以包含：
+
+* 风险描述
+* 当前值
+* 推荐值
+* 风险等级
+* 相关 SQL
+* 建议操作
+* 可执行的修复 SQL（如适用）
+
+示例流程：
+
+```text
+发现风险
+     ↓
+理解风险
+     ↓
+查看建议
+     ↓
+审查 SQL
+     ↓
+确认
+     ↓
+执行修复
+```
+
+以下危险操作：
+
+```text
+DELETE
+DROP
+TRUNCATE
+```
+
+需要二次确认。
+
+所有执行操作均有日志记录。
+
+> 风险建议仅供参考。执行前请结合实际生产架构、负载与业务需求自行评估变更。
+
+---
+
+# 🐢 慢查询深度分析
+
+RaccoonX 可以从多个维度分析慢 SQL 或高代价 SQL。
+
+分析内容可包括：
+
+* SQL 文本
+* 执行计划
+* 执行时长
+* CPU 占用
+* I/O 行为
+* 锁等待
+* 索引使用
+* 执行频率
+* 资源消耗
+* 历史信息
+* AI 辅助诊断
+
+目标是把 SQL 症状与数据库及系统层面的证据关联起来，而不是只盯着 SQL 文本。
+
+---
+
+# 🔒 锁与阻塞诊断
+
+锁分析提供如下信息：
+
+* 阻塞会话
+* 被阻塞会话
+* 阻塞链
+* 锁等待
+* 长事务
+* 死锁统计
+* 会话关系
+* 建议处置动作
+
+对于支持的数据库，可以直接从风险分析界面生成处置 SQL。
+
+---
+
+# 📊 索引健康分析
+
+RaccoonX 分析索引相关状况，包括：
+
+* 可能缺失的索引
+* 冗余索引
+* 长期未使用的索引
+* 索引统计信息
+* 索引相关的 SQL 性能问题
+
+应用任何变更前，请结合实际负载特征审阅建议。
+
+---
+
+# ⚙️ 配置基线
+
+RaccoonX 提供可配置的基线管理。
+
+通过 Web UI 可以定义：
+
+* 推荐值
+* 阈值
+* 合规规则
+* 数据库专属配置
+* 巡检规则
+
+示例覆盖：
+
+```text
+MySQL
+PostgreSQL
+Oracle
+SQL Server
+DM8
+TiDB
+YashanDB
+KingbaseES
+GBase 8s
+MongoDB
+ClickHouse
+```
+
+基线引擎将数据库实际参数与配置的推荐值进行对比。
+
+---
+
+# 📈 历史趋势分析
+
+巡检结果可以在本地留存，并进行多轮对比分析。
+
+历史分析可以呈现：
+
+* 资源趋势
+* 配置变化
+* 风险变化
+* 性能变化
+* 前后对比
+* 风险随时间的演化
+
+从而实现从：
+
+```text
+一次性巡检
+```
+
+到：
+
+```text
+数据库健康持续跟踪
+```
+
+的转变。
+
+---
+
+# 📡 实时监控
+
+Web UI 为支持的数据库类型提供实时监控。
+
+典型指标包括：
+
+* 响应延迟
+* QPS / TPS
+* 活跃连接数
+* 总连接数
+* 运行中会话数
+* 可用性
+* 慢查询
+* 活跃连接热力图
+
+监控大屏会根据各数据库类型的能力自动适配。
+
+对于不支持深度指标采集的数据库类型，RaccoonX 可以提供 TCP 层连通性信息，包括：
+
+* 可达 / 不可达时间线
+* 可用率
+* 认证失败
+* 端口不可达
+* 断路器状态
+* 不支持深采状态
+
+---
+
+# 🔥 慢查询与连接热力图
+
+监控界面提供热力图可视化：
+
+* 慢查询
+* 活跃连接
+* 时间分布
+* 连接活动
+
+自动刷新间隔可在以下范围配置：
+
+```text
+5s – 60s
+```
+
+同时支持 CSV 导出。
 
 ---
 
 # 🤖 AI 智能诊断
 
+RaccoonX 支持 AI 辅助数据库诊断。
 
-RaccoonX 集成 AI 能力，对数据库巡检结果进行智能分析。
+AI 层可以分析巡检结果并给出：
 
+* 风险解释
+* 可能的根因
+* 优化建议
+* SQL 分析
+* 配置建议
+* 运维建议
 
-支持：
+## 基于 Ollama 的本地 AI
 
-| AI 模式 | 说明 |
-|-|-|
-| Ollama | 本地大模型部署，数据不离开内网 |
-| OpenAI Compatible API | 支持兼容 OpenAI 协议的 AI 服务 |
-| Disabled | 关闭 AI 功能 |
-
-
-AI 可以帮助：
-
-- 解释风险原因
-- 分析故障根因
-- 提供优化建议
-- 生成处理方案
-
-
-例如：
-
-> CPU 持续升高，结合慢 SQL、锁等待和历史趋势，分析可能原因并给出优化建议。
-
-
----
-
-# 🔍 性能分析
-
-
-RaccoonX 提供数据库性能分析能力：
-
-
-包括：
-
-- 慢 SQL 深度分析
-- SQL 执行计划分析
-- 锁等待分析
-- 阻塞链分析
-- 索引健康分析
-- 连接压力分析
-- 性能趋势分析
-
-
-帮助 DBA 从：
-
-> "发现问题"
-
-进一步做到：
-
-> "理解问题"
-
-和：
-
-> "解决问题"
-
-
----
-
-# 📊 历史趋势分析
-
-
-RaccoonX 保存多次巡检结果。
-
-
-支持：
-
-- 指标趋势变化
-- 历史风险对比
-- 优化前后分析
-- 数据库健康变化追踪
-
-
-帮助团队发现：
-
-- 性能退化
-- 容量增长
-- 配置变化
-- 潜在风险
-
-
----
-
-# 🔌 插件扩展体系
-
-
-RaccoonX 提供插件化架构。
-
-
-插件可以独立管理：
-
-- 数据库适配
-- 巡检规则
-- 报告模板
-- 参数基线
-
-
-开发者可以通过插件扩展 RaccoonX 能力。
-
-
-适用于：
-
-- 企业内部数据库
-- 国产数据库适配
-- 自定义巡检规范
-
-
----
-
-# 🖥️ 主机健康检查
-
-
-数据库问题往往与服务器资源相关。
-
-
-RaccoonX 同时支持服务器巡检：
-
-
-检查：
-
-- CPU
-- 内存
-- 磁盘
-- 网络
-- 进程
-- 系统资源
-
-
-帮助定位：
-
-数据库问题还是基础设施问题。
-
-
----
-
-# 🌐 Web 管理界面
-
-
-RaccoonX 提供完整 Web UI：
-
-
-支持：
-
-- 数据源管理
-- 巡检任务管理
-- 报告查看
-- AI 诊断
-- 参数管理
-- 趋势分析
-- 插件管理
-
----
-
-## 支持的数据库
-
-| 数据库 | 驱动方式 | 默认端口 | 说明 |
-|--------|---------|:---:|------|
-| MySQL | pymysql | 3306 | 5.6 / 5.7 / 8.0+ |
-| MariaDB | pymysql（MySQL 协议） | 3306 | 10.3+ |
-| PostgreSQL | psycopg2 | 5432 | 10+ |
-| Oracle | oracledb（纯 Python，无需客户端） | 1521 | 11g R2 / 12c / 19c / 21c+ |
-| Oracle (JDBC) | JDBC（JPype1 + ojdbc） | 1521 | 11g / 12c / 19c / 21c+，完整移植 Oracle 11g 巡检模板 |
-| SQL Server | pyodbc + ODBC Driver 17 | 1433 | 2012+ |
-| DM8（达梦） | dmpython | 5236 | 国产数据库 |
-| TiDB | pymysql（MySQL 协议） | 4000 | 6.5+ |
-| IvorySQL | psycopg2（PG 协议） | 5333 | PG + Oracle 双兼容 |
-| YashanDB（崖山） | yashandb | 1688 | Oracle 兼容，国产数据库 |
-| KingbaseES（人大金仓） | psycopg2（PG 协议） | 54321 | 国产数据库 |
-| GBase 8s | JDBC（jaydebeapi + JDK） | 9088 | 国产数据库 |
-| 优炫 UXDB | uxdb_jdbc（JDBC） | 33060 | 国产数据库，PostgreSQL 兼容 |
-| 瀚高 HGDB | hgdb_jdbc（JDBC，PG 协议） | 5866 | 国产数据库，PostgreSQL 兼容（V9 = PG 14.20） |
-| MongoDB | pymongo | 27017 | 4.0+ |
-| DB2（LUW） | JDBC（JPype1 + db2jcc4） | 50000 | 11.5+ / 12.x（LUW） |
-| OceanBase（MySQL 租户） | pymysql（MySQL 协议） | 2881 | 4.x+；兼容 MySQL；Oracle 租户预留 |
-| TDSQL-C MySQL | pymysql（MySQL 协议） | 3306 | 腾讯云云原生 MySQL 兼容数据库（TDSQL-C） |
-| Redis | redis-py | 6379 | KV 缓存，3.0+（6.0+ 支持 ACL） |
-| Redis 集群 | redis-py（RedisCluster） | 6379 | 16384 槽位，种子节点自动发现 |
-| ClickHouse | clickhouse-jdbc（JPype1 + clickhouse-jdbc 驱动） | 8123 | 列式 OLAP，21.8+（单机/集群） |
-
-> **说明**：Oracle (JDBC) 是基于 JDBC (JPype) 连接的独立插件，提供与 Oracle 原生驱动相同的巡检能力，适合无法安装 Oracle 客户端的场景。
-
----
-## 快速上手
-
-### 一、Docker 快速上手（推荐）
-
-Docker 可以使用以下两种方式：
-
-#### 1、docker images
-一条命令启动，无需安装任何依赖：
+对于要求数据库信息不出内网的环境：
 
 ```bash
-# 两个 Docker 镜像源，选择其一
-# 1、Docker Hub
-docker pull jackge12345/dbcheck:latest
-docker run -d -p 5003:5003 \
-  -v dbcheck_data:/app/data \
-  -v dbcheck_reports:/app/data/reports \
-  -e LD_LIBRARY_PATH=/opt/venv/lib/python3.12/site-packages/dmssl \
-  --name dbcheck \
-  jackge12345/dbcheck:latest
-
-# 2、GitHub Container Registry
-docker pull ghcr.io/fiyo/dbcheck:latest
-docker run -d -p 5003:5003 \
-  -v dbcheck_data:/app/data \
-  -v dbcheck_reports:/app/data/reports \
-  -e LD_LIBRARY_PATH=/opt/venv/lib/python3.12/site-packages/dmssl \
-  --name dbcheck \
-  ghcr.io/fiyo/dbcheck:latest
+ollama pull qwen3:30b
+ollama pull nomic-embed-text
 ```
 
-#### 2、docker-compose
+然后启动 RaccoonX：
 
-```bash
-curl -o deploy/docker-compose.yml https://raw.githubusercontent.com/fiyo/DBCheck/main/deploy/docker-compose.yml
-docker compose -f deploy/docker-compose.yml up -d
-```
-
-### 二、源码安装快速上手
-
-#### 1、环境要求
-
-- Python 3.10+
-- 各数据库对应的 Python 驱动
-
-#### 2、拉取本地模型
-
-本地安装 Ollama，并使用以下命令拉取模型：
-
-```bash
-ollama pull qwen3:30b          # 拉取诊断模型（此处以qwen3:30b为例）
-ollama pull nomic-embed-text    # 拉取 RAG 嵌入模型（知识库功能需要）
-```
-#### 3、拉取源码并安装依赖
-```bash
-# 克隆项目
-git clone https://github.com/fiyo/DBCheck.git
-cd DBCheck
-
-# 安装依赖
-pip install -r deploy/requirements.txt
-
-```
-#### 4、启动 Web UI
 ```bash
 python web_ui.py
 ```
 
-### 三、打包分发
+在「AI 设置」页面配置 AI 后端。
 
-使用根据不同平台分别以下命令打包为单个可执行文件：
+### 支持的 AI 后端
+
+| 后端       | 说明                         |
+| ---------- | ---------------------------- |
+| `ollama`   | 本地 AI 部署                 |
+| `openai`   | OpenAI 兼容云端 API          |
+| `disabled` | 关闭 AI                      |
+
+使用 Ollama 时，巡检数据可以完全保留在本地环境。
+
+> AI 生成的建议在生产环境应用前，应由合格的数据库工程师审阅。
+
+---
+
+# 💬 AI 对话巡检
+
+RaccoonX 在 Web UI 中内置了 AI 交互面板。
+
+无需逐个手动翻阅巡检选项，用户可以用自然语言与巡检流程交互。
+
+例如：
+
+```text
+看看连接使用率最高的数据库有哪些。
+
+分析一下这个实例的慢 SQL。
+
+风险最高的配置项有哪些？
+
+解释一下这个数据库为什么 I/O 这么高。
+
+对比本次巡检与上次巡检的差异。
+```
+
+可用能力取决于所配置的数据库与 AI 后端。
+
+---
+
+# 📚 RAG 知识库
+
+RaccoonX 内置本地知识库能力。
+
+支持的文档类型包括：
+
+* PDF
+* Word
+* Markdown
+* TXT
+
+文档可被向量化，并在 AI 诊断时检索引用。
+
+典型流程：
+
+```text
+上传文档
+        ↓
+向量化
+        ↓
+知识检索
+        ↓
+数据库巡检
+        ↓
+AI 诊断
+        ↓
+结合上下文的建议
+```
+
+企业可以把数据库巡检数据与自己的运维文档、规范结合起来。
+
+---
+
+# 🔌 插件架构
+
+RaccoonX 采用可扩展的插件架构。
+
+插件可以独立管理自己的：
+
+* 生命周期
+* 元数据
+* 巡检模板
+* 基线
+* 规则
+* 插件数据
+
+典型插件结构：
+
+```text
+plugins/available/your_plugin/
+├── plugin.json
+├── main_plugin.py
+├── template_data.json
+├── baseline_data.json
+└── rules/
+```
+
+插件可以通过 Web UI 安装、启用、禁用与卸载。
+
+---
+
+## 内置插件
+
+| 插件          | 数据库                        | 说明                                                 |
+| ------------- | ----------------------------- | ---------------------------------------------------- |
+| MongoDB       | MongoDB 4.0+                  | 连接状态、数据库统计、慢查询                         |
+| Oracle JDBC   | Oracle 11g / 12c / 19c / 21c+ | 基于 JDBC 的 Oracle 巡检                             |
+| DB2 JDBC      | DB2 LUW 11.5+ / 12.x          | JDBC 巡检与系统目录分析                              |
+| Redis         | Redis 3.0+                    | 内存、客户端、持久化、复制、安全                     |
+| Redis 集群    | Redis Cluster                 | 拓扑、槽位、节点与故障转移                           |
+| UXDB JDBC     | UXDB 2.x                      | PostgreSQL 兼容巡检                                  |
+| HGDB JDBC     | HGDB V9                       | PostgreSQL 兼容巡检                                  |
+| TDSQL-C MySQL | TDSQL-C                       | MySQL 兼容巡检                                       |
+
+插件开发文档：
+
+```text
+docs/plugin/
+```
+
+---
+
+# 🖥️ 服务器巡检
+
+服务器巡检独立于数据库巡检。
+
+可采集：
+
+* CPU
+* 内存
+* 磁盘
+* 网络
+* 进程
+* 服务
+* 系统资源
+
+可以单独生成服务器巡检报告。
+
+这样在排障时可以将数据库与操作系统信息放在一起综合考量。
+
+---
+
+# 🖥️ 远程终端
+
+RaccoonX 内置基于 SSH 的远程终端。
+
+支持的功能包括：
+
+* 密码认证
+* SSH 密钥认证
+* 多终端标签页
+* 全屏模式
+
+当数据库诊断需要检查底层主机时非常实用。
+
+---
+
+# 🔗 分享报告
+
+巡检报告可以通过生成的链接分享。
+
+支持的能力包括：
+
+* 一键分享
+* 免登录查看
+* 权限隔离
+* 访问计数
+* 随时删除
+
+示例：
+
+```text
+/share/<share_id>
+```
+
+---
+
+# ⏰ 定时巡检
+
+RaccoonX 支持基于 Cron 表达式的定时巡检任务。
+
+常见调度包括：
+
+```text
+每天
+工作日
+每周
+每月
+自定义 Cron
+```
+
+巡检完成后，可通过以下方式发送通知：
+
+* 邮件
+* Webhook
+* 企业微信
+* 钉钉
+* 自定义 JSON Webhook
+
+Word 巡检报告可作为邮件附件发送。
+
+---
+
+# 💾 容灾备份
+
+RaccoonX 内置容灾备份模块。
+
+支持的备份对象包括：
+
+* MySQL
+* MariaDB
+* PostgreSQL
+* 文件
+
+功能包括：
+
+* 定时备份
+* Cron 调度
+* 保留期清理
+* 备份历史
+* 备份健康评分
+* 一键恢复点
+* Webhook 通知
+* 邮件通知
+
+数据库密码使用 Fernet 加密存储，并在 API 响应中脱敏。
+
+---
+
+# 📊 Oracle AWR 分析
+
+Oracle AWR HTML 报告可以上传到 RaccoonX。
+
+系统可以解析关键性能信息并生成结构化的 Word 分析报告。
+
+也可以开启 AI 辅助分析。
+
+典型流程：
+
+```text
+Oracle AWR HTML
+       ↓
+上传
+       ↓
+解析
+       ↓
+分析
+       ↓
+生成报告
+       ↓
+AI 辅助诊断
+```
+
+---
+
+# 💿 DM8 离线存储检查
+
+RaccoonX 支持在数据库实例未启动的情况下进行 DM8 存储巡检。
+
+可直接检查：
+
+```text
+.DBF
+dm.ctl
+```
+
+支持的模式：
+
+* 本地目录
+* 远程 SSH 服务器
+
+存储扫描器可以基于二进制特征识别可疑数据块。
+
+例如：
+
+```text
+ZERO_PAGE（全零页）
+CONSTANT_FILL（单一字节填充）
+TRUNCATED（文件截断）
+```
+
+检出的数据块按以下维度报告：
+
+* 物理页号
+* 文件偏移
+* 表空间
+
+也可以生成结构化的 Word 报告。
+
+---
+
+# 📝 SQL 编辑器
+
+RaccoonX 在 Web UI 中内置了交互式 SQL 编辑器。
+
+功能包括：
+
+* SQL 语法高亮
+* 数据库对象浏览
+* 结果表格
+* 执行历史
+* 友好的错误提示
+
+编辑器支持已配置驱动与插件所覆盖的数据库类型。
+
+---
+
+# 🌍 多语言支持
+
+RaccoonX 目前支持：
+
+1. 中文
+2. English
+3. 繁體中文
+4. 日本語
+5. 한국어
+6. Español
+7. Français
+8. Deutsch
+9. Русский
+
+切换语言的方式：
+
+* Web UI 语言选择器
+* CLI 参数
+
+示例：
 
 ```bash
-# 1、Windows
-build/build_windows.bat
+python -m entrypoints.cli --lang en
+```
 
+本地化覆盖范围：
+
+* 界面文字
+* 菜单
+* 报告
+* AI 诊断标签
+
+RaccoonX 同时支持：
+
+* 深色主题
+* 浅色主题
+
+---
+
+# 🔌 REST API
+
+RaccoonX 提供用于自动化与集成的 REST API。
+
+通过 API Key 认证，可以将 RaccoonX 集成到：
+
+* CI/CD
+* 监控平台
+* 自动化系统
+* 内部运维平台
+
+## 健康检查
+
+```bash
+curl http://localhost:5003/api/v1/health
+```
+
+## 触发巡检
+
+```bash
+curl -X POST http://localhost:5003/api/v1/inspect \
+  -H "X-API-Key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "db_type": "mysql",
+    "host": "192.168.1.100",
+    "port": 3306,
+    "user": "root",
+    "password": "****"
+  }'
+```
+
+## 异步巡检
+
+```bash
+curl -X POST http://localhost:5003/api/v1/inspect \
+  -H "X-API-Key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "db_type": "oracle",
+    "host": "192.168.1.200",
+    "service_name": "ORCL",
+    "user": "system",
+    "password": "****",
+    "mode": "async"
+  }'
+```
+
+## API 端点
+
+| 端点                        | 方法 | 说明       |
+| --------------------------- | ---- | ---------- |
+| `/api/v1/health`            | GET  | 健康检查   |
+| `/api/v1/inspect`           | POST | 触发巡检   |
+| `/api/v1/inspect/{task_id}` | GET  | 查询任务结果 |
+| `/api/v1/inspects`          | GET  | 近期任务列表 |
+| `/share/<share_id>`         | GET  | 查看分享报告 |
+
+生产环境建议使用 nginx 等反向代理，并定期轮换 API Key。
+
+---
+
+# 📦 打包分发
+
+RaccoonX 可以使用 PyInstaller 打包为独立可执行文件。
+
+## Windows
+
+```bash
+rd /s /q build dist __pycache__
+pyinstaller dbcheck.spec
 cd dist
 dbcheck.exe
-
-# 2、Linux
-build/build_linux.sh
-
-cd dist
-./dbcheck
-
-# 3、MacOS
-build/build_macos.sh
-
-cd dist
-./dbcheck
 ```
 
-### 四、访问界面
-
-访问 **http://localhost:5003**，默认账号为 `admin`，密码为 `admin123`（首次登录后请在账户中心修改密码）。
-
----
-
-## 核心功能一览
-
-| 功能 | 说明 |
-|------|------|
-| 🗄️ 数据源管理 | 统一管理所有数据库实例，支持分组、批量巡检、CSV 导入导出 |
-| 📋 数据库巡检 | 覆盖 21 种数据库，330+ 条巡检规则，自动生成 Word 报告 |
-| 🔌 插件系统 | 可扩展插件架构，支持生命周期管理（安装/卸载）、插件数据独立、插件市场 |
-| 🔍 慢查询深度分析 | 关联执行计划、I/O 模式、锁等待等维度，AI 辅助根因分析 |
-| 🔒 锁诊断 | 阻塞链可视化、死锁统计、长事务检测，含可执行修复脚本 |
-| 📊 索引健康分析 | 检测缺失索引、冗余索引、长期未使用索引 |
-| ⚙️ 配置基线检查 | 270+ 基线配置参数（动态推荐 + 默认合规），各库关键参数当前值与推荐值对比分析 |
-| 📈 历史趋势分析 | 多轮巡检数据聚合，生成趋势折线图，前后对比变化 |
-| 🤖 AI 智能诊断 | 基于本地 Ollama，根据巡检指标自动生成优化建议 |
-| 💬 AI 对话巡检 | Web UI 右下角 AI 面板，自然语言发起巡检 |
-| 📡 实时监控 | 首页实时监控（吞吐/连接/延迟/可用性）+ 慢查询/活跃连接热力图 |
-| 🖥️ 服务器巡检 | CPU/内存/磁盘/网络/进程全面检查 |
-| 🔗 分享链接 | 一键生成在线分享链接，免登录查看报告 |
-| ⏰ 定时任务 | Cron 表达式定期巡检，完成后自动邮件/Webhook 通知 |
-| 📚 RAG 知识库 | 上传运维文档，AI 诊断时自动检索相关知识 |
-| 📊 AWR 报告分析 | 上传 Oracle AWR HTML 报告，自动生成 Word 分析报告 |
-| 💿 DM8 离线存储检查 | 离线检查 DM8 存储健康，扫描数据文件定位坏块（全零/异常填充/截断） |
-| 📝 SQL 编辑器 | Web UI 内置，语法高亮，结果表格，执行历史 |
-| 🖥️ 远程终端 | 基于 SSH，多标签页，全屏模式 |
-| 🔀 工作流编排 | 可视化 DAG 画布；将专员 / 中枢 / 技能 / 输出节点按条件分支串联 |
-| 🛡️ SQL 审计 | SQL 审核风险评分 + 受控执行（默认 dry-run，执行前快照可回滚） |
-| 🔌 MCP 工具箱 | 将巡检能力与 Skills 暴露为 MCP 工具，供外部 AI 客户端（Claude Desktop 等）调用 |
-
----
-
-## 高级能力
-
-### 协同诊断中枢（智能诊断中心）
-
-把「一句目标 + 一个数据源」交给一组专精的**诊断专员**（1 名协调员 + 10 名领域专家，共 11 位），在**共享上下文（黑板）**上协同推进，最终输出：异常发现、根因推断、可执行处置方案，以及方案代价评估与工单。
-
-| 专员 | 领域 | 职责 |
-|------|------|------|
-| 协调员 | 编排 | 理解诊断目标，决定由哪些专员参与、以何种顺序处理（AI 驱动或规则兜底） |
-| 运行监控哨兵 | 监控 | 紧盯宿主真实资源与数据库细粒度指标，第一时间发现 CPU、IO、内存、连接、锁、复制等异常波动并预警 |
-| 容量分析专员 | 监控 | 评估容量余量、增长趋势与资源饱和风险 |
-| 深度巡检分析专员 | 巡检 | 实时调用巡检引擎对目标数据源产出报告，提炼配置 / 容量 / 性能等维度风险并标注等级 |
-| 基线比对专员 | 巡检 | 将当前配置与基线 / 历史比对，标记配置漂移 |
-| 根因定位分析专员 | 根因 | 汇总监控异常与巡检风险，关联聚类推断根因，并给出处置主线 |
-| 国产库专家 | 根因 | 针对国产库（达梦 DM8 / 瀚高 HGDB / 金仓 Kingbase / 崖山 YashanDB / 南大 GBase / 优炫 UXDB）的专项诊断知识 |
-| SQL 治理专员 | SQL | 针对慢 SQL 与高代价语句，给出改写、索引与变更审核建议 |
-| 索引顾问 | SQL | 检测缺失 / 冗余 / 长期未用索引，为慢 SQL 提出索引方案 |
-| 锁等待分析专员 | 锁 | 针对锁等待与阻塞，溯源持锁会话与等待链并给出拆解建议 |
-| 自然语言探查专员 | 自然语言 | 以自然语言查询方式探查目标数据库，发现隐藏异常 |
-
-- **共享上下文（黑板）**：所有中间结论、发现与处置方案沉淀于同一空间，专员间直接读写，避免结论在层层传递中失真。
-- **任务动态规划**：运行监控、深度巡检、根因定位常驻协同；SQL 治理与锁分析在发现相关现象时动态提前执行。
-- **单点容错**：单个专员异常不影响整体协同，异常记入上下文，协同继续推进。
-- **流式协同**：中枢逐个调度专员并产出进度事件，前端经 SSE 实时展示"现在谁在研判"。
-- **方案代价验证（Cost Optimizer）**：对处置方案逐条评估代价 / 收益 / 可行性，推荐"先易后难"执行顺序，并标注是否需维护窗口或可由系统自动执行。
-- **工单闭环**：诊断结果一键生成工单，跟踪 `待处理 / 处理中 / 已解决 / 已关闭 / 已取消`，回写执行反馈，形成"诊断 → 派单 → 处置 → 反馈"闭环。
-- **诊断历史**：每次协同诊断完整落库（本地 SQLite），生成诊断编号（`diag_no`），支持按数据源筛选、查看完整结果、一键回填工单。
-
-### eBPF 内核级宿主采集
-
-当目标 Linux 主机具备 **Python3 + bcc + root** 时，可启用 eBPF，获取用户态工具难以企及的内核指标：
-- **块设备服务时间百分位（p50 / p95 / p99，微秒级）**：内核 kprobe 测量每次块 IO 的 device service time，精度高于 psutil 聚合的 `await`，擅长暴露长尾抖动。
-- **按进程的 IO 归因**：IO 起始记录 pid / 命令名，Completion 关联，输出 Top IO 进程。
-- **按进程的 CPU 占用归因**：基于 `sched:sched_switch` 跟踪点计算 on-CPU 时间，输出 Top CPU 进程，区分"真忙"与"等 IO"。
-
-克制与安全：默认关闭、仅 opt-in，绝不向生产默认注入 eBPF；每条指标带 `host_collector_source` 标记（`ebpf` / `psutil` / `unavailable`）；任一环节失败安全降级为 psutil；无 Python / psutil 时降级为纯 Shell（`/proc`）采集。
-
-### SSH 安全宿主采集
-
-面向"不想在被采集机装 agent"的场景：
-- **无 agent、无 Python 也可采集**：纯 Shell（`/proc`）采集脚本经 SSH 注入远端执行；目标机有 Python3 + bcc 才进一步启用 eBPF。
-- **安全护栏**：全局并发信号量（Semaphore = 4）限制 SSH 总数；每主机一把锁（同刻至多 1 条连接）；`set_keepalive(15)` 保活；通道 `settimeout(12)` 有界读取；硬超时看门狗（默认 8s，SIGALRM + 独立线程 `os._exit`）防止会话悬挂；瞬时错误退避重试（max_retries = 2），认证失败不重试。
-- **凭据安全**：实例密码经 **Fernet 加密存储**，采集时解密使用，绝不把密文当明文传给远端或数据库。
-
-### 统一可观测视图
-
-把**宿主资源（eBPF / psutil / SSH）+ 数据库细粒度指标 + 巡检风险**统一到同一分析平面。一次协同诊断里，既能看到"磁盘 p99 时延突增"，也能看到"对应时段的慢 SQL 与锁等待"，根因定位不再是孤立数字，而是可串联的证据链。
-
----
-
-## 工作流编排（Workflow Orchestration）
-
-在可视化 **DAG 画布** 上编排可复用的诊断剧本。将节点拖到画布，用有向边连接（连线点固定上入下出），再对数据源一键运行整条流程。
-
-| 节点 | 作用 |
-|------|------|
-| 开始 / 结束 | 流程边界（开始仅出、结束仅入） |
-| 专员 | 在共享上下文上运行某位诊断专员（如索引顾问、锁等待分析专员） |
-| 中枢 | 触发一次完整的协同重诊断（`DiagnosticHub.dispatch`） |
-| 技能 | 复用某个 Skills / WriteGate 动作（如执行 SQL、创建索引） |
-| 函数 | 任意 `callable(ctx, args)`，用于数据搬运 / 条件注入 |
-| 输出 | 产出结果：在界面展示、生成 Markdown 报告，或发送邮件 |
-
-- **条件分支**：每个步骤支持 `when(ctx)` 谓词，流程随发现自适应（例如仅在出现慢 SQL 时进入索引顾问分支）。
-- **持久化与重跑**：工作流落库 SQLite（`workflow_store`），可在 Web UI「工作流编排」页查看 / 运行 / 查看结果，Reviewer 审计链内联展示。
-- **复用不重造**：专家能力、WriteGate、Reviewer 均来自既有 intelligence 模块。
-
-## SQL 审计
-
-内置、常驻的 SQL 审核与受控执行模块。
-
-- **审核**：提交 SQL 即获基于规则的风险评分（MVP1：MySQL 解析 + 规则 + 评分 + 报告）；可按任务开启执行计划分析。
-- **受控执行（MVP3）**，默认安全：
-  - 默认 **dry-run**；真实执行需 `exec_enabled=1` 且绑定目标实例。
-  - DML 在单事务内执行并设**影响行数硬上限**；UPDATE/DELETE 前将 SELECT 原行快照写入备份表以备回滚。
-  - DDL 不可回滚，仅生成建议级反向 DDL，绝不自动执行。
-  - 每次执行 / 回滚动作均 append-only 留痕（`sql_audit_executions` / `sql_audit_rollbacks`）。
-- 工作流 / 技能产生的**写操作**以工单形式进入 SQL 审计页，形成「审核 → 审批 → 执行 → 反馈」闭环。
-
-## MCP 工具箱（对外 MCP 工具箱化）
-
-将 RaccoonX 的巡检能力与 Skills 暴露为 **MCP（Model Context Protocol）工具**，供外部 AI 客户端（Claude Desktop 等）原生驱动数据库巡检。
-
-- 独立的 **stdio MCP Server**（`modules/mcp_server`）：Skills 与 MCP 工具共用同一注册表（`modules.mcp_server.registry`），能力只定义一次，多 Agent 中枢与 MCP Server 两方复用。
-- **Chat2DB 桥接**：`chat2db_bridge.py` 经 stdio 连接 Chat2DB MCP Server，提供自然语言转 SQL（`nl2sql`），不嵌入任何 Chat2DB 代码（source-available 许可，仅做协议桥接）。
-- 访问受全局风险元数据与 WriteGate 门控；依赖未配置时优雅降级为 `Chat2DBUnavailable`。
-
----
-
-## 社区版 vs 专业版 · 核心能力对比
-
-| 能力 | 社区版 | 专业版 |
-|------|:-----:|:-----:|
-| 多数据源巡检 | ✅ | ✅ |
-| 实时监控 + 健康大屏 | ✅ | ✅ |
-| AI 智能诊断 | ✅ | ✅ |
-| 插件体系 | ✅ | ✅ |
-| 企业级 RBAC | ✅ | ✅ |
-| eBPF 内核级宿主采集 |  ✅ | ✅ |
-| SSH 安全宿主采集 |  ✅ | ✅ |
-| 协同诊断中枢（11 专员 + 黑板） |  ✅ | ✅ |
-| 方案代价验证 |  ✅ | ✅ |
-| 工单闭环 |  ✅ | ✅ |
-| 诊断历史 |  ✅ | ✅ |
-| 统一可观测视图 | ✅ | ✅ |
-| 工作流编排 | ✅ | ✅ |
-| SQL 审计（审核 + 受控执行） | ✅ | ✅ |
-| MCP 工具箱（外部 AI 集成） | ✅ | ✅ |
-
----
-
-## 🔌 插件系统
-
-RaccoonX 自 v2.8.0 引入了完全独立的插件架构。插件现在可以管理自己的生命周期和数据，实现真正的可扩展性。
-
-### 核心特性
-
-| 特性 | 说明 |
-|------|------|
-| 插件生命周期管理 | `on_install()` 和 `on_uninstall()` 方法，自动初始化和清理数据 |
-| 插件数据独立 | 每个插件自带 `template_data.json`、`baseline_data.json` 和规则引擎文件 |
-| 插件市场 | 通过 Web UI 浏览、安装、卸载、启用/禁用插件 |
-| 干净卸载 | 卸载插件时自动清理模板、基线和规则 |
-| 插件配置 | 每个插件有自己的 `plugin.json` 用于元数据和配置 |
-
-### 插件开发
-
-插件是独立的 Python 包，结构如下：
-
-```
-plugins/available/your_plugin/
-├── plugin.json          # 插件元数据
-├── main_plugin.py      # 插件类（继承 InspectionPlugin）
-├── template_data.json  # 巡检模板（可选）
-├── baseline_data.json  # 基线配置（可选）
-└── rules/             # 规则引擎文件（可选）
-```
-
-详细插件开发指南，请参见[插件开发文档](docs/plugin/)。
-
-### 内置插件（v2.8.0）
-
-| 插件 | 数据库 | 说明 |
-|------|--------|------|
-| MongoDB | MongoDB 4.0+ | 基础巡检（连接状态、数据库统计、慢查询） |
-| Oracle (JDBC) | Oracle 11g/12c/19c/21c+ | 完整移植 Oracle 11g 巡检模板（21 个章节、58 个查询、11 条基线） |
-| DB2（JDBC） | DB2 LUW 11.5+ / 12.x | JDBC（JPype1 + db2jcc4）LUW 巡检插件，42 条规则，基于系统目录 SQL |
-| Redis | Redis 3.0+ | KV 缓存巡检：连接、版本、内存、客户端、持久化、性能、复制、键空间、慢查询、配置基线 |
-| Redis 集群 | Redis Cluster | 在单机能力基础上增加集群拓扑（CLUSTER INFO / NODES）、槽位分布与节点健康 |
-| 优炫 UXDB（JDBC） | UXDB 2.x | PostgreSQL 兼容的国产库巡检插件，12 条规则，基于 ux_catalog 系统目录编写 |
-| 瀚高 HGDB（JDBC） | HGDB V9 | PostgreSQL 兼容（PG 14.20）的国产库巡检插件，12 条规则，基于标准 PG 系统目录编写 |
-| TDSQL-C MySQL（插件） | TDSQL-C MySQL | 腾讯云 MySQL 兼容巡检插件；复用 MySQL 采集引擎与 20 条规则集 |
-
-> **说明**：插件完全独立。安装插件时自动初始化数据；卸载插件时自动清理所有关联数据。
-
----
-
-## 数据库巡检
-
-### 各库巡检覆盖
-
-| Category | MySQL | PG | Oracle | Oracle (JDBC) | SQL Server | DM8 | TiDB | IvorySQL | YashanDB | KingbaseES | GBase 8s | MongoDB | HGDB | TDSQL-C |
-| ---------- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| Basic Info (version/instance/DB) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Sessions & Connections | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Memory & Cache | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ |
-| Tablespaces | — | — | ✅ | ✅ | ✅ | ✅ | — | — | ✅ | — | ✅ | — | — | — |
-| SGA / PGA Memory | — | — | ✅ | ✅ | — | ✅ | — | — | ✅ | — | — | — | — | — |
-| Redo Logs | — | — | ✅ | ✅ | — | ✅ | — | ✅ | — | — | — | — | — | — |
-| Archive & Backup | — | — | ✅ | ✅ | ✅ | ✅ | — | — | ✅ | — | — | — | — | — |
-| Key Parameter Config | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Invalid Objects | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ |
-| User Security Audit | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Top SQL / Slow Queries | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Replication / Data Guard | ✅ | ✅ | — | — | — | — | ✅ | ✅ | — | ✅ | — | ✅ | ✅ | ✅ |
-| RAC Cluster | — | — | ✅ | ✅ | — | — | — | — | — | — | — | — | — | — |
-| Lock & Blocking Detection | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ |
-| Object Statistics | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | — | — | — |
-| Partitioned Tables | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | — | — | — | — |
-| Chunks / Disk Storage | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
-| Logical Logs / Checkpoints | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
-| Database Status & Stats | — | — | — | — | — | — | — | — | — | — | — | ✅ | — | — |
-
-
-### Word 报告结构（Oracle 示例）
-
-| 章节 | 内容 |
-|------|------|
-| 封面 | 数据库名、版本、主机信息、巡检人、时间戳 |
-| 第1章 | OS 主机信息（CPU / 内存 / 磁盘） |
-| 第2章 | 数据库基本信息 |
-| 第3章 | 表空间（含自动扩展） |
-| 第4章 | SGA / PGA 内存分析 |
-| 第5章 | 关键参数配置 |
-| 第6~19章 | Undo / Redo / 归档 / DG / RAC / ASM / 会话 / 性能 / 安全等 |
-| 第20章 | 风险与建议（含可执行修复 SQL） |
-| 第21章 | AI 诊断建议（Markdown 自动渲染为 Word） |
-| 第22章 | 报告说明 |
-
-> 各数据库类型报告结构略有差异，均可通过 Web UI 自由配置巡检章节。
-
-### DB2 LUW 巡检（JDBC）
-
-IBM Db2 LUW（Linux/Unix/Windows）**11.5+ / 12.x** 通过 JDBC 插件（`db2_jdbc`）提供支持，使用 **JPype1 + IBM `db2jcc4.jar`** 连接（默认端口 **50000**）。采用数据驱动巡检，共 **6 个章节**、内置 **42 条规则**，全部基于 Db2 系统目录与监控视图编写（不含已废弃的 9.7 旧目录名）。
-
-| 维度 | 覆盖内容 |
-|------|----------|
-| 版本与实例 | DB2 版本、实例配置（dbm cfg）、数据库配置（db cfg）、成员/分区拓扑 |
-| 表空间与存储 | 表空间大小、使用率、自动扩展、容器状态 |
-| 缓冲池 | 缓冲池定义、命中率、容量建议 |
-| 会话与应用 | 活跃应用、Top 消耗者、连接饱和度 |
-| 锁与阻塞 | 锁等待、持锁情况、阻塞链、长事务 |
-| 表与索引 | 表/行统计、索引 RUNSTATS 新鲜度、未使用/冗余索引 |
-| Top SQL | 来自包缓存的高代价 SQL |
-| 活动监控 | Mon-get 活动指标、耗时热点 |
-| 内存 | `MON_GET` 内存集、dbm 内存分布 |
-
-生成的 Word 报告包含统一的**系统资源**章节（CPU / 内存 / 磁盘）、**风险与建议**章节（含一键修复 SQL）以及 **AI 诊断建议**章节。需要 `db2jcc4.jar` 驱动与 JDK 8/11/17——Docker 镜像已内置，Db2 数据源开箱即用。
-
-### Redis 巡检（单机 + 集群）
-
-Redis **3.0+** 通过两个独立插件提供支持——`redis`（单机）与 `redis-cluster`（集群），底层由 **redis-py 8.x**（RESP2、编码安全）驱动。单机巡检共 **11 个章节**，覆盖内存、键空间、持久化（RDB / AOF）、客户端、性能、安全、复制、CPU、配置基线及慢查询摘要；集群插件在全部单机维度之上，额外增加**集群拓扑**（CLUSTER INFO / NODES）、16384 槽位分布与节点健康。
-
-| 维度 | 单机 | 集群 |
-|------|:---:|:---:|
-| 内存与键空间 | ✅ | ✅ |
-| 持久化（RDB / AOF） | ✅ | ✅ |
-| 客户端与连接 | ✅ | ✅ |
-| 性能与慢查询 | ✅ | ✅ |
-| 复制 | ✅ | ✅（含故障转移） |
-| 安全（requirepass / ACL） | ✅ | ✅ |
-| 集群拓扑（节点 / 槽位） | — | ✅ |
-| 节点健康与故障转移 | — | ✅ |
-
-生成的 Word 报告包含统一的**系统资源**章节（CPU / 内存 / 磁盘）、**风险与建议**章节（含一键修复 SQL）以及 **AI 诊断建议**章节。集群支持**种子节点自动发现**；对于 Redis < 6.0（无 ACL）的场景，用户名会被安全忽略并在界面给出提示。需安装 `redis >= 5.0` 依赖（`pip install redis`）。
-
-> **说明**：OceanBase（MySQL 租户）复用 MySQL 巡检引擎与规则集（端口 **2881**，pymysql）；Oracle 租户支持预留，将在后续版本提供。
-
----
-
-
-### 瀚高 HGDB 巡检（JDBC）
-
-瀚高 **HGDB V9**（PostgreSQL 14.20 内核）通过 JDBC 插件（`hgdb_jdbc`）提供支持，采用标准 **PostgreSQL 协议**连接（驱动 `org.postgresql.Driver` + `postgresql-42.2.2.jar`，默认端口 **5866**，默认库 **highgo**）。采用数据驱动巡检，共 **8 个章节**、**21 个查询**，基于标准 PG 系统目录与视图（`pg_settings`、`pg_stat_activity`、`pg_locks`、`pg_roles`、`pg_stat_user_tables`、`pg_hba_file_rules` 等）编写，并内置 **12 条规则**（`pro/rules/builtin/hgdb.yaml`），覆盖连接、内存、备份、锁、维护、安全与系统维度，统一并入 **风险与建议** 章节。SQL 编辑器亦通过 psycopg2 路径完整支持 HGDB（列库 / 列表视图 / 执行 SQL）。
-
-### TDSQL-C MySQL 巡检（插件）
-
-**TDSQL-C MySQL**（腾讯云数据库，100% 兼容 MySQL 协议）通过独立插件（`tdsqlc_mysql`）提供支持，复用核心 **MySQL 巡检引擎**（`main_mysql.MySQLInspector`）与 **MySQL 规则集**（`pro/rules/builtin/mysql.yaml`，现已打上 `tdsqlc_mysql` 标签）。通过 **PyMySQL** 连接（默认端口 **3306**，默认库 **mysql**），执行与 MySQL 完全一致的 MySQL 数据驱动巡检（8 个章节 / 21 个查询），并统一并入 **风险与建议** 章节。SQL 编辑器亦通过 PyMySQL 路径完整支持 TDSQL-C MySQL（列库 / 列表视图 / 执行 SQL）。
-
-## 智能风险分析
-
-自动检测各类数据库潜在风险，**每条风险附带可执行修复 SQL，支持一键执行**。
-
-### 风险规则统计
-
-| 数据库 | 规则数 | 覆盖维度 |
-|--------|:---:|------|
-| MySQL | 35+ | 连接、内存、磁盘、慢查询、锁、安全、复制 |
-| PostgreSQL | 27+ | 连接、缓存、性能、安全、归档、死元组 |
-| Oracle | 20+ | 表空间、TEMP、会话、SGA、Redo、DG、ASM、安全 |
-| Oracle (JDBC) | 20+ | 与 Oracle 相同（完整移植 Oracle 11g 模板） |
-| SQL Server | 15+ | 连接、会话、等待、锁、死锁、备份、内存 |
-| DM8 | 16+ | 表空间、内存池、会话、事务、备份、安全 |
-| TiDB | 18+ | 连接、内存、磁盘、慢查询、锁、安全、Placement |
-| IvorySQL | 27+ | 与 PostgreSQL 相同 |
-| YashanDB | 15+ | 连接、内存、表空间、锁、备份、安全 |
-| KingbaseES | 19+ | 连接、缓存、性能、安全、归档、统计信息 |
-| GBase 8s | 6+ | 连接、dbspace、日志、内存、密码策略 |
-| MongoDB | 10+ | 连接、内存、操作、复制、安全 |
-| DB2（LUW） | 42 | 表空间、缓冲池、锁、内存、配置、Top SQL、安全 |
-| OceanBase | 复用 MySQL 35+ + OB 专有 12 | 租户、参数、复制、资源、安全 |
-| Redis | 12 | 安全、内存、连接、持久化、复制、性能 |
-| Redis 集群 | 17 | 单机 12 + 集群 5（槽位 / 节点 / 故障转移） |
-| ClickHouse | 15 | 复制、内存、part/合并、慢查询、配置、磁盘 |
-| 优炫 UXDB | 12 | 连接数、共享内存、备份就绪、锁等待、死元组、密码加密、超级用户、实例内存等 |
-
-### 一键修复
-
-每条风险卡片提供「执行修复」按钮，危险操作（DELETE/DROP/TRUNCATE）需二次确认，所有操作均有日志记录。
-
----
-
-## AI 智能诊断
-
-基于本地 **Ollama** 部署，巡检数据完全离线，无需联网。
-
-| 后端 | 说明 | 适用场景 |
-|------|------|---------|
-| `ollama` | 纯本地，零成本，数据不出机器 | 内网环境、高安全要求 |
-| `openai` | 云端 API（OpenAI / DeepSeek），需联网 | 允许云端 API 的环境 |
-| `disabled` | 禁用 AI（默认） | 不需要 AI 功能 |
-
----
-
-## 其他功能
-
-### SQL 编辑器
-
-Web UI 内置交互式 SQL 编辑器，支持全部 21 种数据库，语法高亮、结果表格、错误友好提示。
-
-### 首页实时监控
-
-首页「📡 实时监控」面板按实例展示实时 ECharts 图表，通过 flask-socketio 每 30s 自动推送刷新（v2.10.0 新增）：
-
-- **响应延迟 (ms)** —— TCP 往返时延，所有数据库类型均有。
-- **吞吐（QPS / TPS）** —— 深采计数器（查询数、事务数、批处理请求、编译次数等）自动差分算速率。支持 MySQL/TiDB、PostgreSQL/PG/Kingbase、Oracle、达梦 DM8 与 SQL Server。
-- **连接数** —— 活跃/总会话数与运行中的会话数。
-
-**非深采实例的连通性画像**：暂不支持深采（或深采临时失败）的实例不再展示空白图表，而是显示「端口可用性」时间线（可达/不可达）与「连通性诊断」仪表盘（可用率 + 真实失败原因，如认证失败、断路器退避、端口不可达或"该类型暂不支持深采"），即使只有 TCP 层数据也能保持信息完整。
-
-### 慢查询与连接热力图
-
-慢查询 + 活跃连接实时监控，热力图可视化，自动刷新（5~60 秒可调），支持 CSV 导出。
-
-### 远程终端
-
-基于 SSH，支持密码/密钥认证，多标签页管理，全屏模式。
-
-### 服务器巡检
-
-独立于数据库巡检，覆盖 CPU / 内存 / 磁盘 / 网络 / 服务 / 进程，生成专业服务器巡检报告。
-
-### 历史趋势分析
-
-多轮巡检数据自动聚合，Web UI 趋势分析页面展示折线图 + 阈值线，前后对比变化用彩色箭头标注。
-
-### 定时任务与通知
-
-支持 Cron 表达式，快捷预设（每天/工作日/每周/每月），任务完成后自动邮件（附件 Word 报告）或 Webhook（企业微信/钉钉/自定义 JSON）通知。
-
-### 分享链接
-
-一键生成在线分享链接，免登录查看报告，权限隔离，自动记录访问次数，随时删除。
-
-### 配置基线管理
-
-Web UI 可视化编辑各库关键参数的推荐值、阈值和合规规则。当前支持：
-
-- MySQL：22 项参数（buffer pool、连接数、binlog 等）
-- PostgreSQL：21 项参数（shared_buffers、work_mem、WAL 等）
-- Oracle：12 项参数（SGA/PGA、processes、undo 等）
-- Oracle (JDBC)：12 项参数（与 Oracle 相同）
-- SQL Server：6 项参数（内存、并行度、备份压缩等）
-- DM8：7 项参数（内存目标、会话数、缓冲池等）
-- TiDB：9 项参数（buffer pool、连接数、并发度等）
-- YashanDB：8 项参数（缓冲池、连接、日志等）
-- KingbaseES：7 项参数（连接、缓冲、vacuum 等）
-- GBase 8s：9 项参数（MAXCONNECTIONS、SHMVIRTSIZE、BUFFERS、LOGSMAX 等）
-- MongoDB：8 项参数（最大连接数、缓存大小、复制集等）
-- ClickHouse：9 项参数（max_memory_usage、max_server_memory_usage、max_concurrent_queries、background_pool_size、max_execution_time、max_rows_to_read、max_insert_block_size、max_partitions_per_insert_block、background_merges_mutations_concurrency_ratio）
-
-以上为各库动态推荐参数示例；结合默认合规规则，全量基线配置参数共 270+ 项（新增 ClickHouse 9 项）。
-
-### 巡检章节管理
-
-可配置驱动，每种数据库可独立添加/删除/排序/启停巡检章节，Word 报告动态生成。
-
-### AWR 报告分析
-
-上传 Oracle AWR HTML 报告，自动解析关键性能指标，生成结构化 Word 分析报告，支持 AI 辅助诊断。
-
-### DM8 离线存储检查
-
-**无需启动数据库实例**，直接扫描 DM8 数据文件目录（`.DBF` 文件 + `dm.ctl`）即可评估存储健康度。支持本地目录与 SSH 远程两种方式。
-
-- **本地 / SSH 远程双模式** —— 既可指定本地目录，也可通过 SSH（密码 / 密钥）连接远程服务器扫描其数据文件。
-- **数据块损坏分析** —— 基于通用二进制信号识别可疑坏块：
-  - `ZERO_PAGE` —— 整页全为 `0x00`
-  - `CONSTANT_FILL` —— 整页为单一字节（如全 `0xFF`）
-  - `TRUNCATED` —— 文件末页字节数不足页大小（文件被截断）
-  - 每个坏块都标注物理页号与文件偏移，并归属到对应表空间（由 `dm.ctl` 解析）。
-- **Word 报告 + Web UI 查看** —— 自动生成结构化 Word 报告（含独立的「数据块损坏分析」章节），同时坏块清单可直接在 Web UI 中查看。报告统一保存至 `reports/` 目录。
-
-### RAG 知识库
-
-上传 PDF / Word / Markdown / TXT 文档，自动向量化，AI 诊断时自动检索相关知识，生成更精准的建议。
-
-### 多语言与主题
-
-- **支持 9 种语言**：简体中文（默认）、English、繁體中文、日本語、한국어、Español、Français、Deutsch、Русский
-- 可随时通过 Web UI 语言选择器（右上角）或 CLI 参数（`python -m entrypoints.cli --lang <语言码>`）切换
-- 界面文字、菜单、报告模板、AI 诊断标签均已本地化
-- 支持深色 / 浅色主题，偏好自动保存
-
----
-
-## REST API
-
-API Key 认证，支持 CI/CD 和监控系统集成。
+## Linux
 
 ```bash
-# 健康检查
-curl http://localhost:5003/api/v1/health
-
-# 触发巡检（同步）
-curl -X POST http://localhost:5003/api/v1/inspect \
-  -H "X-API-Key: YOUR_KEY" -H "Content-Type: application/json" \
-  -d '{"db_type":"mysql","host":"192.168.1.100","port":3306,"user":"root","password":"****"}'
-
-# 触发巡检（异步，返回 task_id）
-curl -X POST http://localhost:5003/api/v1/inspect \
-  -H "X-API-Key: YOUR_KEY" -H "Content-Type: application/json" \
-  -d '{"db_type":"oracle","host":"192.168.1.200","service_name":"ORCL","user":"system","password":"****","mode":"async"}'
+pyinstaller build/dbcheck_linux.spec
+cd dist
+./dbcheck
 ```
 
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/api/v1/health` | GET | 健康检查 |
-| `/api/v1/inspect` | POST | 触发巡检 |
-| `/api/v1/inspect/{task_id}` | GET | 查询任务结果 |
-| `/api/v1/inspects` | GET | 近期任务列表 |
-| `/share/<share_id>` | GET | 查看分享报告 |
+---
 
-> 生产环境建议搭配 nginx 反向代理，定期轮换 API Key。
+# 🧩 环境要求速查
+
+| 数据库                             | Python 驱动         | 额外依赖                   |
+| ---------------------------------- | ------------------- | -------------------------- |
+| MySQL / TiDB                       | pymysql             | —                          |
+| PostgreSQL / IvorySQL / KingbaseES | psycopg2-binary     | —                          |
+| Oracle                             | oracledb            | 无需 Instant Client        |
+| SQL Server                         | pyodbc              | ODBC Driver 17             |
+| DM8                                | dmpython            | DM8 客户端库               |
+| YashanDB                           | yashandb            | —                          |
+| GBase 8s                           | jaydebeapi + JPype1 | JDK + JDBC 驱动            |
+| Oracle JDBC                        | JPype1 + ojdbc      | JDK + ojdbc                |
+| MongoDB                            | pymongo             | —                          |
+| DB2 LUW                            | JPype1 + db2jcc4    | JDK + db2jcc4.jar          |
+| OceanBase                          | pymysql             | —                          |
+| Redis / Redis 集群                 | redis-py            | —                          |
+| ClickHouse                         | JDBC                | JDK + JDBC 驱动            |
 
 ---
 
-## 环境要求速查
+# ❓ FAQ
 
-| 数据库 | Python 驱动 | 额外依赖 |
-|--------|-----------|---------|
-| MySQL / TiDB | pymysql | — |
-| PostgreSQL / IvorySQL / KingbaseES | psycopg2-binary | — |
-| Oracle | oracledb（推荐） | 无需 Instant Client |
-| SQL Server | pyodbc | ODBC Driver 17 |
-| DM8 | dmpython | DM8 客户端库 |
-| YashanDB | yashandb | — |
-| **GBase 8s** | **jaydebeapi + JPype1** | **JDK 8/11/17 + JDBC 驱动 jar** |
-| **Oracle (JDBC)** | **jpype1 + ojdbc** | **JDK 8/11/17 + ojdbc6.jar/ojdbc8.jar** |
-| **MongoDB** | **pymongo** | **—** |
-| **DB2（LUW）** | **jpype1 + db2jcc4** | **JDK 8/11/17 + db2jcc4.jar** |
-| **OceanBase** | **pymysql** | **—** |
-| **Redis / Redis 集群** | **redis-py** | **—** |
+### 部分巡检章节为空？
+
+各数据库类型的巡检覆盖范围不同。
+
+RaccoonX 使用数据库专属模板，并在部分指标不可用时通过优雅降级机制处理。
 
 ---
 
-## FAQ
+### 连接失败，应该检查什么？
 
-**Q：部分内容为空或缺失？**
-A：模板渲染兼容性问题时会自动降级渲染，关键数据不会丢失。
+检查：
 
-**Q：连接失败？**
-A：检查数据库是否允许远程访问、用户权限、防火墙端口。
-
-**Q：GBase 8s 连接报 "Driver not found"？**
-A：确认 JDBC 驱动 jar 在 `drivers/gbase/jdbc-3.5.1.jar`，且 JDK 已安装。Docker 镜像已预装，无需额外配置。
-
-**Q：AI 诊断不工作？**
-A：确认 Ollama 已启动（`ollama serve`）且模型已下载（`ollama pull qwen3:30b`）。
-
-**Q：Oracle ORA-01017 用户名密码错误？**
-A：SYSDBA 用户需勾选 Web UI 的 "SYSDBA" 复选框，或 CLI 中输入 `sys as sysdba`。
-
-**Q：风险建议仅供参考？**
-A：内置阈值基于通用最佳实践，请结合实际业务评估。
+1. 数据库网络可达性
+2. 防火墙规则
+3. 数据库监听 / 服务状态
+4. 用户名与密码
+5. 用户权限
+6. 数据库专属连接参数
 
 ---
 
-## 关于稳定性与 Bug
+### GBase 8s 报 "Driver not found"。
 
-**RaccoonX 由个人利用业余时间开发和维护**，采用 Apache-2.0 协议完整开源，社区版永久免费，不收取任何费用。
+使用 Docker 镜像时，所需的 JDK 与 JDBC 驱动已内置。
 
-项目覆盖 21 种数据库、330+ 条巡检规则，需要面对不同大版本、不同参数配置、不同权限模型的大量组合。项目没有专职测试团队，也没有 QA 流水线，因此**无法保证所有场景下都零缺陷**。每个版本发布前会自测主干流程，但自测环境覆盖不了真实生产环境的全部情况。
-
-遇到问题时，有三条路可选：
-
-- **提 Issue** — 附上数据库类型与版本、报错信息、复现步骤。这是最有效的反馈方式，一般都会得到跟进。
-- **提 PR** — 仓库对所有人开放，欢迎直接提交修复或新特性。项目支持的很多数据库和规则，最初都来自使用者的贡献。
-- **换用其他方案** — 如果你的场景对可靠性要求较高，成熟的商业巡检产品提供专职团队、SLA 与售后支持。这是完全合理的选择。
-
-这是一个免费开源的业余项目，不承诺商业级的可靠性保证；但只要问题被认真提出，就会被认真对待。
-
-> 依据 Apache-2.0 协议，本软件按「原样」提供，不附带任何明示或默示的担保。请自行评估其对生产环境的适用性，并在关键场景下做好独立验证。
+源码安装时，请检查 JDBC 驱动与 JDK 配置。
 
 ---
 
-## 致谢
+### AI 诊断不工作。
 
-本项目参考了以下项目，特此感谢：
+检查：
 
-- [Zhh9126/MySQLDBCHECK](https://github.com/Zhh9126/MySQLDBCHECK.git)
-- [Zhh9126/SQL-SERVER-CHECK](https://github.com/Zhh9126/SQL-SERVER-CHECK.git)
+```bash
+ollama serve
+```
 
-## 支持项目
+并确认所选模型已下载：
 
-> ❤️ 感谢每一位支持者的认可与鼓励。
->
-> RaccoonX 社区为开源软件，在开源协议许可范围内复制、修改、分发或用于商业。
->
-> 如果项目曾帮助过您，欢迎支持；如果您选择不赞助，也完全没有关系。一个 Star、一条建议、一次 Bug 反馈，甚至一句鼓励的话，都是推动项目前进的动力。
->
-> 尊重每一种选择，也感谢每一位使用者。
->
-## 企业服务
-> 对于需要专业数据库咨询、定制检查规则、部署协助、培训或技术支持的组织，请联系项目维护人员。
-> 
-> 可用服务包括：
-> - 企业部署支持
-> - 自定义检查模板
-> - 数据库健康评估
-> - 性能优化咨询
-> - 技术培训
-> 
-> 联系方式：
-> 
-> 网站：https://dbcheck.top
-> 
-> 电子邮件：sdfiyon@gmail.com
+```bash
+ollama pull qwen3:30b
+```
 
-<img src="snapshot/pay.png" alt="赞助二维码" width="800" />
+然后在 Web UI 中核对 AI 设置。
+
+---
+
+### Oracle 报 ORA-01017。
+
+核对：
+
+* 用户名
+* 密码
+* 服务名
+* 认证模式
+
+SYSDBA 用户请在 Web UI 中勾选 SYSDBA 选项，或使用：
+
+```text
+sys as sysdba
+```
+
+---
+
+### 推荐的修复可以自动执行吗？
+
+任何建议都不应盲目应用到生产环境。
+
+RaccoonX 提供巡检结果与建议处置动作。数据库工程师应在执行前结合实际环境审阅变更方案。
+
+---
+
+# 🔄 从 DBCheck 到 RaccoonX
+
+RaccoonX 前身是 **DBCheck**。
+
+项目从一款数据库巡检工具起步，逐步扩展为更完整的数据库运维平台。
+
+**RaccoonX** 这个名字代表项目的下一个阶段。
+
+```text
+DBCheck
+   │
+   ├── 数据库巡检
+   ├── 风险分析
+   ├── 性能分析
+   ├── AI 诊断
+   ├── 监控
+   ├── 插件
+   └── 自动化
+          ↓
+      RaccoonX
+```
+
+原 DBCheck 名称仍可能出现在：
+
+* 仓库地址
+* Docker 镜像名
+* 既有部署配置
+* 历史文档
+* 既有脚本
+
+随着 RaccoonX 品牌演进，这些将逐步统一。
+
+> **RaccoonX — 原名 DBCheck。**
+
+---
+
+# 🤝 参与贡献
+
+RaccoonX 是开源项目，欢迎各种形式的贡献。
+
+你可以通过以下方式参与：
+
+* ⭐ 给仓库点 Star
+* 🐛 报告 Bug
+* 💡 提交功能建议
+* 🗄️ 完善数据库巡检规则
+* 🔌 开发插件
+* 📝 完善文档
+* 🌍 完善翻译
+* 🔧 提交 Pull Request
+* 📢 把 RaccoonX 分享给其他数据库工程师
+
+提交 Pull Request 前，请先阅读：
+
+```text
+CONTRIBUTING.md
+```
+
+---
+
+# 🐛 问题与功能建议
+
+请通过 GitHub Issues 提交：
+
+* Bug 报告
+* 功能建议
+* 数据库兼容性问题
+* 安装问题
+* 性能问题
+* 文档问题
+
+报告数据库专属问题时，请提供：
+
+```text
+数据库类型
+数据库版本
+RaccoonX 版本
+操作系统
+安装方式
+相关报错信息
+复现步骤
+```
+
+发帖前请先移除密码、凭据、IP 地址等敏感信息。
+
+---
+
+# 💬 社区
+
+欢迎围绕以下话题交流：
+
+* 数据库运维
+* DBA 自动化
+* 数据库巡检
+* 数据库性能
+* AI 辅助数据库运维
+* 插件开发
+* 开源开发
+* 数据库兼容性
+
+不属于 Bug 报告的疑问与想法，请使用 GitHub Discussions。
+
+---
+
+# 🙏 致谢
+
+RaccoonX 参考并借鉴了数据库社区的项目、工具与思路。
+
+特别感谢以下项目：
+
+* [Zhh9126/MySQLDBCHECK](https://github.com/Zhh9126/MySQLDBCHECK)
+* [Zhh9126/SQL-SERVER-CHECK](https://github.com/Zhh9126/SQL-SERVER-CHECK)
+
+感谢每一位为数据库社区与开源社区贡献力量的人。
+
+---
+
+# ❤️ 支持项目
+
+RaccoonX 基于 **Apache License 2.0** 开源。
+
+如果 RaccoonX 对你有帮助，有很多方式可以支持这个项目。
+
+### ⭐ 点个 Star
+
+一个 Star 能让更多数据库工程师发现 RaccoonX。
+
+```text
+使用它
+  ↓
+喜欢它
+  ↓
+⭐ Star 它
+  ↓
+分享它
+  ↓
+更多人发现它
+  ↓
+更多反馈
+  ↓
+更好的 RaccoonX
+```
+
+### 🐛 报告 Bug
+
+一份好的 Bug 报告比一个 Star 更有价值。
+
+### 💡 提出功能建议
+
+你的一线需求决定着接下来做什么。
+
+### 🔧 贡献代码
+
+欢迎提交 Pull Request。
+
+### 📢 分享项目
+
+如果你认识可能用得上 RaccoonX 的 DBA 或数据库工程师，把项目分享出去就是最有价值的支持之一。
+
+---
+
+## ☕ 赞助
+
+一些用户通过捐赠支持了这个项目。
+
+金额从来不是最重要的。
+
+对一个独立开源项目来说，一笔小小的捐赠意味着：
+
+> 有人真正用过它。
+> 有人注意到了它。
+> 有人相信它值得继续做下去。
+
+感谢每一位通过捐赠、Star、Issue、Pull Request、建议、文章、测试，或只是向另一位工程师提起 RaccoonX 来支持项目的人。
+
+<img src="snapshot/pay.png" alt="RaccoonX 赞助二维码" width="800" />
 
 <img src="snapshot/dbcheck-badge-800w.png" alt="RaccoonX 支持者徽章" width="800" />
 
@@ -1011,21 +1328,68 @@ A：内置阈值基于通用最佳实践，请结合实际业务评估。
 
 ### 社区支持者
 
-| 日期 | 昵称 | 编号 |
-|------|------|------|
-| 2026-04-28 | 自由的风 | No.000001 |
-| 2026-04-29 | 黄嵘 | No.000002 |
-| 2026-05-04 | 张佰政 | No.000003 |
-| 2026-06-02 | 残酷月光 | No.000004 |
-| 2026-06-03 | 大树 | No.000005 |
+| 日期       | 昵称          | 编号      |
+| ---------- | ------------- | --------- |
+| 2026-04-28 | 自由的风      | No.000001 |
+| 2026-04-29 | 黄嵘          | No.000002 |
+| 2026-05-04 | 张佰政        | No.000003 |
+| 2026-06-02 | 残酷月光      | No.000004 |
+| 2026-06-03 | 大树          | No.000005 |
 | 2026-06-07 | 岳彩波（Adil0518） | No.000006 |
-| 2026-06-17 | 轩 | No.000007 |
-| 2026-06-18 | 卿云 | No.000008 |
-| 2026-06-18 | yuanlnet | No.000009 |
-| 2026-06-18 | 赵法威 | No.000010 |
-| 2026-06-19 | 类延良 | No.000011 |
-| 2026-06-19 | 渺渺兮予怀 | No.000012 |
-| 2026-09-6 | leon | No.000013 |
+| 2026-06-17 | 轩            | No.000007 |
+| 2026-06-18 | 卿云          | No.000008 |
+| 2026-06-18 | yuanlnet      | No.000009 |
+| 2026-06-18 | 赵法威        | No.000010 |
+| 2026-06-19 | 类延良        | No.000011 |
+| 2026-06-19 | 渺渺兮予怀    | No.000012 |
+| 2026-09-06 | leon          | No.000013 |
+
 ---
 
-> 作者：[Jack Ge](https://github.com/fiyo) &nbsp;|&nbsp; 官网：[https://dbcheck.top](https://dbcheck.top) &nbsp;|&nbsp; 邮箱：sdfiyon@gmail.com
+# 📜 开源协议
+
+RaccoonX 是基于以下协议的开源软件：
+
+**Apache License 2.0**
+
+完整协议文本见：
+
+```text
+LICENSE
+```
+
+依据 Apache License 2.0 的条款，你可以自由地使用、修改、分发本项目并基于其构建。
+
+---
+
+# ⚠️ 第三方商标声明
+
+本项目中提及的名称、徽标、商标与数据库技术归其各自所有者所有。
+
+它们在 RaccoonX 中的出现仅表示与对应技术的兼容或集成，不构成任何背书、从属或合作关系。
+
+---
+
+# 🦝 持续构建
+
+RaccoonX 不是由一个大团队打造的。
+
+它靠代码、反馈、Issue、想法、测试、文档、贡献，以及每一位选择使用它的人成长。
+
+```text
+25,000+ Docker Pulls
+
+一次拉取一小步，
+我们持续构建。
+
+🦝 RaccoonX
+```
+
+**感谢你成为 RaccoonX 社区的一员。**
+
+---
+
+**作者：** [Jack Ge](https://github.com/fiyo)
+**项目：** RaccoonX — 原名 DBCheck
+**官网：** https://raccoonx.cn/
+**邮箱：** [sdfiyon@gmail.com](mailto:sdfiyon@gmail.com)
