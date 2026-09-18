@@ -8,7 +8,7 @@
 >
 > Formerly known as **DBCheck**.
 
-[![Version](https://img.shields.io/badge/Version-v26.8.7.1-blue.svg)]()
+[![Version](https://img.shields.io/badge/Version-v26.9.17.0-blue.svg)]()
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)]()
 [![AI](https://img.shields.io/badge/AI-Ollama%20%7C%20OpenAI-orange.svg)]()
@@ -37,7 +37,7 @@ A Star helps more database engineers discover the project and is one of the simp
 * **GitHub:** https://github.com/fiyo/DBCheck
 * **Docker Hub:** https://hub.docker.com/r/jackge12345/dbcheck
 * **English:** `README.md`
-* **中文:** [docs/README_zh.md](docs/README_zh.md)
+* **中文:** [README_zh.md](./README_zh.md)
 * **Issues:** https://github.com/fiyo/DBCheck/issues
 * **Discussions:** https://github.com/fiyo/DBCheck/discussions
 

@@ -37,6 +37,10 @@
   .kpi.ok .v { color: var(--ok); } .kpi.warn .v { color: var(--warn); }
   .kpi.crit .v { color: var(--crit); } .kpi.acc .v { color: var(--accent); }
   .kpi.blue .v { color: var(--blue); }
+  #hist-badge { display: none; align-self: center; padding: 2px 10px; font-size: 11px;
+                color: var(--tx2); border: 1px dashed var(--border); border-radius: 10px;
+                white-space: nowrap; }
+  #hist-badge.show { display: inline-block; }
   #clock { font-size: 15px; color: var(--tx2); font-variant-numeric: tabular-nums; }
   #btn-fs {
     background: var(--panel2); color: var(--tx); border: 1px solid var(--border);
@@ -297,6 +301,7 @@
     <div class="kpi blue"><div class="v" id="k-conn">–</div><div class="l">{{ S.k_conn }}</div></div>
     <div class="kpi acc"><div class="v" id="k-qps">–</div><div class="l">{{ S.k_qps }}</div></div>
     <div class="kpi acc"><div class="v" id="k-tps">–</div><div class="l">{{ S.k_tps }}</div></div>
+    <span id="hist-badge">{{ S.hist_ns }}</span>
   </div>
   <div id="clock">--:--:--</div>
   <div id="freshness" class="fresh" title="">–</div>
@@ -1631,6 +1636,7 @@ function enterHistory(){
   histTo = now; histFrom = now - span; histAt = now;
   document.getElementById('hist-bar').classList.add('show');
   document.getElementById('btn-hist').classList.add('on');
+  document.getElementById('hist-badge').classList.add('show');
   markHistPreset(span);
   renderHistSlider();
   loadHistory();
@@ -1641,6 +1647,7 @@ function exitHistory(){
   historyMode = false;
   document.getElementById('hist-bar').classList.remove('show');
   document.getElementById('btn-hist').classList.remove('on');
+  document.getElementById('hist-badge').classList.remove('show');
   poll().then(scheduleNextPoll, scheduleNextPoll);   // 恢复实时轮询
 }
 
@@ -1664,11 +1671,17 @@ function renderHistSlider(){
   updateHistRangeLabel();
 }
 
+var histSlideTimer = null;               // 滑块拖动防抖：拖动结束 300ms 后才拉取
+
 function onHistSlide(){
   var sl = document.getElementById('hist-slider');
   histAt = Number(sl.value);
-  updateHistRangeLabel();
-  loadHistory();
+  updateHistRangeLabel();                // 标签即时跟随，数据拉取防抖
+  if (histSlideTimer) clearTimeout(histSlideTimer);
+  histSlideTimer = setTimeout(function(){
+    histSlideTimer = null;
+    loadHistory();
+  }, 300);
 }
 
 function updateHistRangeLabel(){

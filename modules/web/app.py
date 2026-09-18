@@ -6075,7 +6075,8 @@ def monitor_screen_page():
              'th_title', 'th_conn_util', 'th_tbs_free', 'th_repl_lag', 'th_locks',
              'th_warn', 'th_crit', 'th_save', 'th_reset', 'th_saved', 'th_btn', 'th_tip',
              'hist_btn', 'hist_tip', 'hist_live', 'hist_1h', 'hist_6h', 'hist_24h', 'hist_7d', 'hist_title',
-             'dt_overview', 'dt_conn', 'dt_slow', 'dt_tbs', 'dt_loading', 'dt_no_conn', 'dt_no_slow', 'dt_rows']
+             'dt_overview', 'dt_conn', 'dt_slow', 'dt_tbs', 'dt_loading', 'dt_no_conn', 'dt_no_slow', 'dt_rows',
+             'hist_ns']
     S = {k: _t('webui.screen_' + k) for k in _keys}
     return render_template('monitor_screen.html', version=__version__, S=S)
 

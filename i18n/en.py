@@ -2918,6 +2918,7 @@ EN = {
     "webui.screen_hist_24h": "Last 24h",
     "webui.screen_hist_7d": "Last 7d",
     "webui.screen_hist_title": "History replay (non-sensitive snapshots)",
+    "webui.screen_hist_ns": "Non-sensitive snapshots",
     "webui.screen_dt_overview": "Overview",
     "webui.screen_dt_conn": "Conn/Session",
     "webui.screen_dt_slow": "Slow Queries",

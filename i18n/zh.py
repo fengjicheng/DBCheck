@@ -2948,6 +2948,7 @@ ZI = {
     "webui.screen_hist_24h": "近24小时",
     "webui.screen_hist_7d": "近7天",
     "webui.screen_hist_title": "历史回放（非敏感指标快照）",
+    "webui.screen_hist_ns": "非敏感快照",
     "webui.screen_dt_overview": "概览",
     "webui.screen_dt_conn": "连接会话",
     "webui.screen_dt_slow": "慢查询",
