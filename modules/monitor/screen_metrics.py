@@ -950,7 +950,11 @@ class ScreenCollector:
                 'blocked': (cd.get('connections') or {}).get('blocked', 0),
             }
         else:
-            snap['err'] = '监控引擎暂无该实例数据'
+            # 引擎本轮尚未采到该实例（启动竞态/新加实例/引擎未就绪）：
+            # 不能凭空判 ok（假绿误导），也不能判 down（误触发告警），
+            # 保持 pending（连接中），等下一轮真实采集结果再落定状态；
+            # 不设 err，避免卡片右上角出现「有错误」角标。
+            snap['status'] = 'pending'
         sd = slow_data.get(iid)
         snap['slowq'] = len(sd.get('data') or []) if sd and not sd.get('error') else 0
         # 下钻明细：连接/会话 与 慢查询 逐行（复用 engine 本轮采集结果，不引入新 SQL）
@@ -978,8 +982,8 @@ class ScreenCollector:
         except Exception as e:
             print('[screen] extra 采集失败 %s: %s' % (snap['label'], e), flush=True)
 
-        # 3) 状态判定
-        if snap['status'] != 'down':
+        # 3) 状态判定（pending = 本轮未探活成功，不参与阈值派生，留给下一轮落定）
+        if snap['status'] not in ('down', 'pending'):
             snap['status'] = self._derive_status(snap)
         return snap
 
@@ -1139,13 +1143,23 @@ def assemble_overview(nodes, collector, trend=None):
                                        (n.get('conn') or {}).get('max_conn', 0))}
                  for n in nodes if n.get('conn')]
     tbs_list = []
+    tbs_used_list = []
     for n in nodes:
         for t in (n.get('tbs') or []):
-            if t.get('free_pct') is not None:
+            fp = t.get('free_pct')
+            if fp is not None:
                 tbs_list.append({'id': n['id'], 'name': '%s · %s' % (n['name'], t['name']),
-                                 'db_type': n['db_type'], 'value': t['free_pct'],
-                                 'total_mb': t.get('total_mb')})
+                                 'db_type': n['db_type'], 'value': fp,
+                                 'total_mb': t.get('total_mb'), 'unit': '%', 'kind': 'free'})
+            elif t.get('total_mb') is not None:
+                # MySQL/PG/SQLServer/GBase/ClickHouse 等只能采到「已用大小」，
+                # 无 free 列 → free_pct 恒为 None；退而求其次按已用 MB 排名，
+                # 让表空间图对这类库也有数据（标题与单位随 kind 自适应）。
+                tbs_used_list.append({'id': n['id'], 'name': '%s · %s' % (n['name'], t['name']),
+                                      'db_type': n['db_type'], 'value': t['total_mb'],
+                                      'total_mb': t.get('total_mb'), 'unit': 'MB', 'kind': 'used'})
     tbs_worst = sorted(tbs_list, key=lambda x: x['value'])[:10]
+    tbs_used = sorted(tbs_used_list, key=lambda x: x['value'], reverse=True)[:10]
     repl_list = [{'id': n['id'], 'name': n['name'], 'db_type': n['db_type'],
                   'value': n.get('repl_lag_s')} for n in nodes if n.get('repl_lag_s') is not None]
     lock_list = [{'id': n['id'], 'name': n['name'], 'db_type': n['db_type'],
@@ -1167,6 +1181,7 @@ def assemble_overview(nodes, collector, trend=None):
         'slowq': _topn([{'id': n['id'], 'name': n['name'], 'db_type': n['db_type'],
                          'value': n['slowq']} for n in nodes], 'value'),
         'tbs_worst': tbs_worst,
+        'tbs_used': tbs_used,
         'repl_lag': _topn(repl_list, 'value'),
         'lock_wait': _topn(lock_list, 'value'),
     }
@@ -1294,97 +1309,6 @@ def build_history_overview(from_ts, to_ts, at_ts):
     trend = [{'ts': t, 'qps': round(agg[t], 1)} for t in sorted(agg)]
 
     return assemble_overview(nodes, collector, trend=trend)
-
-
-    # 分组（数据源自带 group 字段）
-    groups = {}
-    for n in nodes:
-        g = groups.setdefault(n['group'], {'name': n['group'], 'total': 0,
-                                           'ok': 0, 'warn': 0, 'crit': 0, 'down': 0})
-        g['total'] += 1
-        g[n['status']] = g.get(n['status'], 0) + 1
-
-    # TopN（危险优先：tbs_worst 按 free_pct 升序）
-    conn_list = [{'id': n['id'], 'name': n['name'], 'db_type': n['db_type'],
-                  'value': (n.get('conn') or {}).get('usage_pct') or 0,
-                  'detail': '%s/%s' % ((n.get('conn') or {}).get('total', 0),
-                                       (n.get('conn') or {}).get('max_conn', 0))}
-                 for n in nodes if n.get('conn')]
-    tbs_list = []
-    for n in nodes:
-        for t in (snap[n['id']].get('tbs') or []):
-            if t.get('free_pct') is not None:
-                tbs_list.append({'id': n['id'], 'name': '%s · %s' % (n['name'], t['name']),
-                                 'db_type': n['db_type'], 'value': t['free_pct'],
-                                 'total_mb': t.get('total_mb')})
-    tbs_worst = sorted(tbs_list, key=lambda x: x['value'])[:10]
-    repl_list = [{'id': n['id'], 'name': n['name'], 'db_type': n['db_type'],
-                  'value': n['repl_lag_s']} for n in nodes if n.get('repl_lag_s') is not None]
-    lock_list = [{'id': n['id'], 'name': n['name'], 'db_type': n['db_type'],
-                  'value': n['lock_waits']} for n in nodes if n.get('lock_waits') is not None]
-    # 连接数 / 活跃会话 TopN（连接数为主排序，会话数按实例名对齐展示）
-    conn_total_list = [{'id': n['id'], 'name': n['name'], 'db_type': n['db_type'],
-                        'value': (n.get('conn') or {}).get('total') or 0}
-                       for n in nodes if n.get('conn')]
-    sess_list = [{'id': n['id'], 'name': n['name'], 'db_type': n['db_type'],
-                  'value': (n.get('conn') or {}).get('active') or 0}
-                 for n in nodes if n.get('conn')]
-
-    topn = {
-        'qps': _topn([{'id': n['id'], 'name': n['name'], 'db_type': n['db_type'],
-                       'value': n['qps']} for n in nodes], 'value'),
-        'conn_util': _topn(conn_list, 'value'),
-        'conn_total': _topn(conn_total_list, 'value'),
-        'sess_active': _topn(sess_list, 'value'),
-        'slowq': _topn([{'id': n['id'], 'name': n['name'], 'db_type': n['db_type'],
-                         'value': n['slowq']} for n in nodes], 'value'),
-        'tbs_worst': tbs_worst,
-        'repl_lag': _topn(repl_list, 'value'),
-        'lock_wait': _topn(lock_list, 'value'),
-    }
-
-    # 告警滚动（crit 在前，最新在前）
-    alerts = []
-    for n in nodes:
-        if n['status'] == 'down':
-            alerts.append({'level': 'crit', 'id': n['id'], 'name': n['name'],
-                           'msg': '实例探活失败' + (('：' + n['err']) if n.get('err') else ''),
-                           'ts': n.get('ts') or ts})
-            continue
-        cu = (n.get('conn') or {}).get('usage_pct') or 0
-        if n.get('tbs_free_pct') is not None and n['tbs_free_pct'] <= collector.CRIT_TBS_FREE:
-            alerts.append({'level': 'crit', 'id': n['id'], 'name': n['name'],
-                           'msg': '表空间剩余 %.1f%%' % n['tbs_free_pct'], 'ts': ts})
-        elif n.get('tbs_free_pct') is not None and n['tbs_free_pct'] <= collector.WARN_TBS_FREE:
-            alerts.append({'level': 'warn', 'id': n['id'], 'name': n['name'],
-                           'msg': '表空间剩余 %.1f%%' % n['tbs_free_pct'], 'ts': ts})
-        if cu >= collector.CRIT_CONN_UTIL:
-            alerts.append({'level': 'crit', 'id': n['id'], 'name': n['name'],
-                           'msg': '连接利用率 %.0f%%' % cu, 'ts': ts})
-        elif cu >= collector.WARN_CONN_UTIL:
-            alerts.append({'level': 'warn', 'id': n['id'], 'name': n['name'],
-                           'msg': '连接利用率 %.0f%%' % cu, 'ts': ts})
-        lag = n.get('repl_lag_s')
-        if lag is not None and lag >= collector.WARN_REPL_LAG:
-            alerts.append({'level': 'crit' if lag >= collector.CRIT_REPL_LAG else 'warn',
-                           'id': n['id'], 'name': n['name'],
-                           'msg': '复制延迟 %ds' % lag, 'ts': ts})
-        if (n.get('lock_waits') or 0) >= collector.WARN_LOCKS:
-            alerts.append({'level': 'warn', 'id': n['id'], 'name': n['name'],
-                           'msg': '锁等待 %d' % n['lock_waits'], 'ts': ts})
-    lvl_rank = {'crit': 0, 'warn': 1}
-    alerts.sort(key=lambda a: (lvl_rank.get(a['level'], 9), -a['ts']))
-
-    return {
-        'ok': True, 'ts': ts,
-        'kpis': kpis,
-        'groups': list(groups.values()),
-        'topn': topn,
-        'trend': [{'ts': t['ts'], 'qps': t['qps']} for t in trend],
-        'alerts': alerts[:50],
-        'nodes': nodes,
-    }
-
 
 # ═══════════════════════════════════════════════════════════
 #  全局单例

@@ -347,7 +347,7 @@
   </div>
 
   <aside>
-    <div class="panel"><h3>{{ S.tbs_top }}</h3><div class="tbs-list" id="tbs-list"></div></div>
+    <div class="panel"><h3 id="tbs-title">{{ S.tbs_top }}</h3><div class="tbs-list" id="tbs-list"></div></div>
     <div class="panel"><h3>{{ S.repl_top }}</h3><div class="chart" id="c-repl"></div></div>
     <div class="panel"><h3>{{ S.lock_top }}</h3><div class="chart" id="c-lock"></div></div>
     <div class="panel"><h3>{{ S.slowq_top }}</h3><div class="chart" id="c-slow"></div></div>
@@ -653,7 +653,7 @@ function panelHasData(id, data){
     case 'c-lock':   return (T.lock_wait || []).length > 0;
     case 'c-slow':   return (T.slowq || []).length > 0;
     case 'c-health': return (data.nodes || []).length > 0;
-    case 'tbs-list': return (T.tbs_worst || []).length > 0;
+    case 'tbs-list': return (T.tbs_worst || []).length > 0 || (T.tbs_used || []).length > 0;
     case 'topo':     return (data.nodes || []).length > 0;
   }
   return false;
@@ -736,10 +736,11 @@ function barOpt(data, color, opts){
 }
 /* 无数据时图面显示「暂无数据」而非空坐标轴 */
 function setBar(id, arr, color, opts){
-  var opt = barOpt(arr || [], color, opts || {});
+  opts = opts || {};
+  var opt = barOpt(arr || [], color, opts);
   if (!(arr || []).length){
     opt.graphic = [{ type: 'text', left: 'center', top: 'middle',
-      style: { text: S.no_data, fill: C.tx2, fontSize: 12 } }];
+      style: { text: opts.emptyText || S.no_data, fill: C.tx2, fontSize: 12 } }];
     opt.xAxis.show = false; opt.yAxis.show = false;
   }
   chart(id).setOption(opt, true);
@@ -1428,27 +1429,51 @@ function refresh(data){
   }
   chart('c-conns').setOption(connsOpt, true);
   setBar('c-slow', T.slowq, C.warn, { unit: '', showBg: true, tab: 'slow' });
-  /* 表空间：HTML 进度列表（标签完整可读 + 三档等级配色 + 点行下钻实例详情） */
+  /* 表空间：HTML 进度列表（标签完整可读 + 三档等级配色 + 点行下钻实例详情）
+     自适应两种数据来源：
+       - tbs_worst：Oracle/DM/DB2 等有 free 列 → 剩余% 越小越危险（标题带 %）
+       - tbs_used ：MySQL/PG/SQLServer/GBase/ClickHouse 等只有已用 MB → 退化为已用 Top10
+         此时无可比的「剩余%」，按已用 MB 降序，进度条按 Top10 最大值归一化 */
   (function(){
     var el = document.getElementById('tbs-list');
+    var titleEl = document.getElementById('tbs-title');
     var arr = T.tbs_worst || [];
+    var kind = 'free';
+    if (!arr.length){                       // 无 free 列库 → 退化为已用 MB 排名
+      arr = T.tbs_used || [];
+      kind = 'used';
+    }
     if (!arr.length){
+      if (titleEl) titleEl.textContent = S.tbs_top;
       el.innerHTML = '<div class="no-data">' + S.no_data + '</div>';
       return;
     }
+    if (titleEl) titleEl.textContent = (kind === 'free') ? S.tbs_top : S.tbs_used_top;
+    var maxV = (kind === 'free') ? 100
+             : (Math.max.apply(null, arr.map(function(d){ return d.value; })) || 1);
+    var fmt = function(v){
+      if (kind === 'free') return v + '%';
+      return (v >= 1024) ? (v / 1024).toFixed(1) + 'GB' : (Math.round(v) + 'MB');
+    };
+    var colorOf = function(v){
+      if (kind === 'free') return tbsColor(v);          // 剩余越少越危险
+      var r = v / maxV;                                  // 已用越多越危险
+      return r >= 0.85 ? C.crit : r >= 0.6 ? C.warn : C.ok;
+    };
     el.innerHTML = arr.map(function(d, i){
-      var c = tbsColor(d.value);
+      var c = colorOf(d.value);
+      var pct = Math.max(2, Math.min(100, d.value / maxV * 100));
       return '<div class="trow" data-iid="' + esc(d.id || '') + '" title="' + esc(d.name) + '">' +
         '<span class="rk' + (i < 3 ? ' top' : '') + '">' + (i + 1) + '</span>' +
         '<span class="nm">' + esc(d.name) + '</span>' +
-        '<span class="track"><span class="fill" style="width:' + Math.min(d.value, 100) + '%;background:linear-gradient(90deg,' + c + '44,' + c + ')"></span></span>' +
-        '<span class="val" style="color:' + c + '">' + d.value + '%</span></div>';
+        '<span class="track"><span class="fill" style="width:' + pct + '%;background:linear-gradient(90deg,' + c + '44,' + c + ')"></span></span>' +
+        '<span class="val" style="color:' + c + '">' + fmt(d.value) + '</span></div>';
     }).join('');
     Array.prototype.forEach.call(el.querySelectorAll('.trow'), function(row){
       row.addEventListener('click', function(){ openDetailById(row.getAttribute('data-iid'), 'tbs'); });
     });
   })();
-  setBar('c-repl', T.repl_lag, C.blue, { unit: 's', showBg: true });
+  setBar('c-repl', T.repl_lag, C.blue, { unit: 's', showBg: true, emptyText: S.repl_no_data });
   setBar('c-lock', T.lock_wait, C.warn, { unit: '', showBg: true });
 
   drawTrend();   // 趋势图（全局合计 / 实例下钻），数据来自 lastOverview
