@@ -147,12 +147,56 @@ JDBC_DB_TYPES: Tuple[str, ...] = tuple(JDBC_PROFILES.keys())
 # ═══════════════════════════════════════════════════════════════════════════
 # JAVA_HOME 探测（与 main_gbase / 各插件的探测逻辑合并后的统一版本）
 # ═══════════════════════════════════════════════════════════════════════════
+def _is_java_home(path: str) -> bool:
+    """判断目录是否为含可用 JVM 的 JDK/JRE 根。
+
+    布局差异：JDK 9+ 的 jvm.dll 在 ``bin/server/``；JDK 8（含
+    jdk1.8.0_xxx 默认命名）在 ``jre/bin/server/``。Windows 查 jvm.dll，
+    Linux 查 libjvm.so。
+    """
+    if not os.path.isdir(path):
+        return False
+    for _rel in (os.path.join('bin', 'server'), os.path.join('jre', 'bin', 'server')):
+        _jvm = os.path.join(path, _rel)
+        if os.path.isfile(os.path.join(_jvm, 'jvm.dll')) or \
+           os.path.isfile(os.path.join(_jvm, 'libjvm.so')):
+            return True
+    return False
+
+
+def _java_home_sort_key(path: str):
+    """候选排序：老驱动兼容优先——JDK 8（ojdbc6/Connector/J 5.x 只认 ≤8）
+    > 11 > 17 > 其他，同级按目录名稳定排序。"""
+    _n = os.path.basename(path.rstrip('\\/')).lower()
+    if '1.8' in _n or '-8' in _n or 'jdk8' in _n:
+        _pri = 0
+    elif '-11' in _n or 'jdk-11' in _n or '_11' in _n:
+        _pri = 1
+    elif '-17' in _n or 'jdk-17' in _n or '_17' in _n:
+        _pri = 2
+    else:
+        _pri = 3
+    return (_pri, _n)
+
+
 def detect_java_home() -> Optional[str]:
-    """探测 JAVA_HOME：优先环境变量，其次常见安装路径。返回 None 表示未找到。"""
+    """探测 JAVA_HOME：返回可用 JVM 的 JDK/JRE 根目录，None 表示未找到。
+
+    探测顺序（前者命中即返回）：
+      1) 环境变量 JAVA_HOME / JRE_HOME（显式配置，目录存在即尊重）；
+      2) 常见固定路径（含 jdk-17/11/1.8、Microsoft/Adoptium/Zulu）；
+      3) ProgramFiles 系目录通配扫描——覆盖 Oracle JDK 8 默认命名
+         ``jdk1.8.0_xxx``、32 位 ``(x86)`` 目录及 Adoptium/Zulu/Corretto/
+         BellSoft/Microsoft 下的嵌套版本目录（历史盲区：装了 JDK 8 但
+         未配 JAVA_HOME 也扫不到，导致用户误判"没装 JDK"）；
+      4) PATH 里的 java 可执行文件反推（javapath 等 shim 会因校验不过
+         被自然淘汰）。
+    """
     _env = os.environ.get('JAVA_HOME') or os.environ.get('JRE_HOME')
     if _env and os.path.isdir(_env):
         return _env
-    _candidates = []
+
+    # 2) 常见固定路径
     if sys.platform == 'win32':
         _candidates = [
             r'C:\Program Files\Java\jdk-17',
@@ -165,13 +209,13 @@ def detect_java_home() -> Optional[str]:
         ]
         for _base in _candidates:
             if os.path.isdir(_base):
-                # 返回含 bin/server 的 JDK 根；Adoptium/Zulu 下有多版本子目录，取第一个
-                if os.path.isdir(os.path.join(_base, 'bin', 'server')):
+                if _is_java_home(_base):
                     return _base
+                # Adoptium/Zulu 下有多版本子目录，取第一个可用
                 try:
                     for _sub in sorted(os.listdir(_base)):
                         _p = os.path.join(_base, _sub)
-                        if os.path.isdir(os.path.join(_p, 'bin', 'server')):
+                        if _is_java_home(_p):
                             return _p
                 except OSError:
                     pass
@@ -180,6 +224,73 @@ def detect_java_home() -> Optional[str]:
                       '/usr/lib/jvm/java-8-openjdk', '/usr/lib/jvm/default-java'):
             if os.path.isdir(_cand):
                 return _cand
+
+    if sys.platform != 'win32':
+        # Linux 上 PATH 反推兜底
+        return _detect_from_path()
+
+    # 3) Windows：ProgramFiles 系目录通配扫描（两级：发行商目录/版本目录）
+    _pf = os.environ.get('ProgramFiles', r'C:\Program Files')
+    _pf86 = os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')
+    _hit = _glob_scan_java([
+        os.path.join(_pf, 'Java'), os.path.join(_pf86, 'Java'),
+        os.path.join(_pf, 'Eclipse Adoptium'), os.path.join(_pf, 'Eclipse Foundation'),
+        os.path.join(_pf, 'Zulu'), os.path.join(_pf, 'Amazon Corretto'),
+        os.path.join(_pf, 'BellSoft'), os.path.join(_pf, 'Microsoft'),
+    ])
+    if _hit:
+        return _hit
+
+    # 4) PATH 里的 java 反推
+    return _detect_from_path()
+
+
+def _glob_scan_java(bases: List[str]) -> Optional[str]:
+    """在给定发行商/安装器根目录列表下通配扫描可用 JDK/JRE（两级深）。
+
+    命中多个时按 _java_home_sort_key 择优（JDK 8 优先，兼容老驱动）。
+    """
+    _hits = []
+    for _base in bases:
+        try:
+            if not os.path.isdir(_base):
+                continue
+            for _sub in sorted(os.listdir(_base)):
+                _p = os.path.join(_base, _sub)
+                if not os.path.isdir(_p):
+                    continue
+                if _is_java_home(_p):
+                    _hits.append(_p)
+                    continue
+                # 发行商下再嵌一层版本目录（Zulu zulu-17/…、Corretto 等）
+                try:
+                    for _s2 in sorted(os.listdir(_p)):
+                        _p2 = os.path.join(_p, _s2)
+                        if _is_java_home(_p2):
+                            _hits.append(_p2)
+                except OSError:
+                    pass
+        except OSError:
+            pass
+    if _hits:
+        _hits.sort(key=_java_home_sort_key)
+        return _hits[0]
+    return None
+
+
+def _detect_from_path() -> Optional[str]:
+    """从 PATH 中的 java 可执行文件反推 JAVA_HOME（最后兜底）。"""
+    try:
+        import shutil
+        _exe = shutil.which('java')
+        if _exe:
+            # <home>\bin\java.exe → 上推两级；javapath 等 shim 因
+            # _is_java_home 校验不过被自然淘汰
+            _home = os.path.dirname(os.path.dirname(os.path.abspath(_exe)))
+            if _is_java_home(_home):
+                return _home
+    except Exception:  # noqa: BLE001
+        pass
     return None
 
 
@@ -188,9 +299,13 @@ def setup_jvm_env() -> None:
     _java_home = detect_java_home()
     if _java_home:
         os.environ['JAVA_HOME'] = _java_home
-        _jvm_dir = os.path.join(_java_home, 'bin', 'server')
-        if os.path.isdir(_jvm_dir):
-            os.environ['PATH'] = _jvm_dir + os.pathsep + os.environ.get('PATH', '')
+        # 把 jvm.dll 所在目录加入 PATH（Windows 需要）：
+        # JDK 9+ 在 bin/server，JDK 8 在 jre/bin/server
+        for _rel in (os.path.join('bin', 'server'), os.path.join('jre', 'bin', 'server')):
+            _jvm_dir = os.path.join(_java_home, _rel)
+            if os.path.isfile(os.path.join(_jvm_dir, 'jvm.dll')):
+                os.environ['PATH'] = _jvm_dir + os.pathsep + os.environ.get('PATH', '')
+                break
 
 
 # ═══════════════════════════════════════════════════════════════════════════

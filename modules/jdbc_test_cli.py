@@ -922,16 +922,27 @@ def main(argv=None):
 
 
 def _emit(obj):
-    """输出结果行并立即冲刷（子进程可能被强杀，必须即时落盘到管道）。"""
+    """输出结果行并立即冲刷（子进程可能被强杀，必须即时落盘到管道）。
+
+    编码安全：ensure_ascii=True 保证输出纯 ASCII（中文变 \\uXXXX，读侧
+    json.loads 自动还原），并用 buffer 直写绕开 TextIOWrapper——
+    PyInstaller 冻结版子进程不尊重 PYTHONIOENCODING，文本写会按
+    Windows ANSI(GBK) 落盘，主进程按 UTF-8 读即成乱码。
+    """
     try:
-        line = RESULT_PREFIX + json.dumps(obj, ensure_ascii=False)
+        line = RESULT_PREFIX + json.dumps(obj, ensure_ascii=True)
     except Exception:  # noqa: BLE001
         line = RESULT_PREFIX + '{"ok": false, "msg": "结果序列化失败"}'
-    sys.stdout.write('\n' + line + '\n')
+    text = '\n' + line + '\n'
     try:
-        sys.stdout.flush()
-    except Exception:
-        pass
+        sys.stdout.buffer.write(text.encode('utf-8'))
+        sys.stdout.buffer.flush()
+    except Exception:  # noqa: BLE001
+        try:
+            sys.stdout.write(text)
+            sys.stdout.flush()
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':
