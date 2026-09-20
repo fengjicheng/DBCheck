@@ -787,10 +787,12 @@ def run_test(payload):
     # oracledb thin 模式与 gevent monkey-patch 不兼容（连接会挂死），且启用 Instant
     # Client 时的 thick/OCI 原生库同样会在被 patch 的主进程里钉死 hub。因此必须像
     # JVM 类 JDBC 数据源一样，在未被 patch 的干净子进程内执行。逻辑直接复用
-    # app._ct_oracle_pro（含 SSH 隧道 + thick 回退），避免重复实现。
+    # modules.oracle_conn_test._ct_oracle_pro（含 SSH 隧道 + thick 回退），避免重复实现。
     if db_type == 'oracle':
         try:
-            from modules.web.app import _ct_oracle_pro
+            # 从独立模块导入，避免子进程 import 整个 Flask 应用（连带 Redis /
+            # 调度器 / 控制台保活线程等副作用）。逻辑与 app._ct_oracle_pro 一致。
+            from modules.oracle_conn_test import _ct_oracle_pro
         except Exception as e:  # noqa: BLE001 - 子进程内导入失败要转成可读错误
             return False, f'Oracle 测试器不可用: {e}'
         _data = {

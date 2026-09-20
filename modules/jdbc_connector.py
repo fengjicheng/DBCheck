@@ -571,7 +571,15 @@ def _start_jvm(jars: List[str]) -> None:
             jpype.startJVM(*_jvm_tls_args(), classpath=list(jars))
             _JVM_LAST_ERROR = None
         except Exception as e:  # noqa: BLE001 - 记录真实原因，不吞
-            _JVM_LAST_ERROR = f'{type(e).__name__}: {e}'
+            _reason = f'{type(e).__name__}: {e}'
+            # jpype 1.6+ 放弃 Java 8（requirements 已锁 <1.6，双保险）：
+            # 若运行环境混入新 jpype + JDK 8，给出可定位的修复指引而非天书
+            if 'Java version too old' in str(e) or 'Java 9 or later' in str(e):
+                _reason = (f'{_reason}。当前安装的 JPype1 版本要求 JDK 9+，'
+                           f'而运行环境为 JDK 8。请二选一：'
+                           f'① 降级 JPype1 到 1.5.x（pip install "JPype1>=1.5,<1.6"）；'
+                           f'② 改用 JDK 11/17 并确保 JAVA_HOME 指向它。')
+            _JVM_LAST_ERROR = _reason
     else:
         try:
             for _jar in jars:

@@ -41,7 +41,7 @@ dmpython>=1.0.0         # Dameng DM8
 pyodbc>=4.0.0           # SQL Server (also requires ODBC Driver 17)
 gbase8sdb>=0.2.0        # GBase 8s (官方 Python 驱动，需 GBase SDK)
 jaydebeapi>=1.2.0      # GBase 8s JDBC 连接（无需 SDK，需 JDK + JDBC 驱动 jar）
-JPype1>=1.5.0          # jaydebeapi / oracle_jdbc / db2_jdbc 的 JVM 后端（import jpype）
+JPype1>=1.5.0,<1.6      # jaydebeapi / oracle_jdbc / db2_jdbc 的 JVM 后端（import jpype）；1.6 起放弃 Java 8，未锁上界曾致 v26.9.20.0 打包拉到 1.7.1 在 JDK 8 机器 startJVM 必崩
 pymongo>=4.6.0          # MongoDB plugin dependency
 redis>=5.0.0            # Redis / Redis Cluster plugin dependency
 
