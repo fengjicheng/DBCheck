@@ -1,5 +1,18 @@
 # Changelog
 
+## v26.9.23.0 (2026-09-23)
+- **受限容器环境 OpenBLAS 多线程创建被拦截，导致容器启动即崩溃（Docker 部署修复）**
+  - **现象**：在国网云桌面、企业安全容器、定制 seccomp / LXC 嵌套虚拟化 / K8s 等受限容器里，用 Docker 部署 RaccoonX（DBCheck）启动即报 `OpenBLAS blas_thread_init: pthread_create failed for thread N of M: Operation not permitted`。
+  - **根因**：numpy 1.26 内置的 OpenBLAS 在 `import` 阶段按宿主机 CPU 数预建 BLAS 线程池，每建一个线程都要调 `clone()` 系统调用；受限容器底层直接拒绝 `clone()`，导入即崩。该拦截**与 `ulimit` / `--privileged` 无关**——日志里 `RLIMIT_NPROC` 明明是 `65535` 也照样崩，加 `--ulimit nproc=-1` 或 `--privileged` 均无效。
+  - **修复**：镜像层（`deploy/Dockerfile`）与启动入口（`web_ui.py`）在 numpy 导入前，默认将 `OPENBLAS_NUM_THREADS` / `OMP_NUM_THREADS` / `MKL_NUM_THREADS` / `NUMEXPR_NUM_THREADS` 设为 `1`，从根上让 OpenBLAS 不建线程池（单线程模式下完全不调 `clone()`）。本项目 numpy 仅用于 openpyxl / 报表等轻量数值场景，单线程几乎无性能损失；CPU 密集场景可用 `-e OPENBLAS_NUM_THREADS=4` 覆盖默认值。
+  - **影响范围**：仅影响容器 / 受限 Linux 部署；Windows 直装、普通 Linux 直装不受影响。旧镜像（v26.9.20.1 及之前）需重新拉取 `jackge12345/dbcheck:v26.9.23.0`。
+
+## v26.9.20.1 (2026-09-20)
+- 锁定 `JPype1<1.6` 兼容 Java 8（避免 CI 拉到 1.7.1 在 JDK8 机器 `startJVM` 崩溃导致测试连接子进程无结果）；拆分 Oracle 测试连接为独立模块，测试连接子进程不再 import 整个 Flask 应用。
+
+## v26.9.20.0 (2026-09-20)
+- RaccoonX（浣巡）品牌升级、SQL 审计 MVP2、智能诊断中心迭代、公告 banner 系统、打赏二维码上线。
+
 ## v26.9.15.0 (2026-09-15)
 - **告警邮件/Webhook 通知（重磅，678aa95）**：新增 `modules/monitor/alert_notify.py` 告警状态机，完全复用设置页既有邮件 SMTP / 企业微信/钉钉 Webhook 通知配置；**状态迁移才发送**（正常→告警、warn/crit 等级变化、告警→恢复），同一告警绝不重发；服务启动时已处于异常的实例**合并发送一封摘要邮件**（防重启刷屏且不漏报）；多实例同轮告警 SMTP 串行发送防并发拒信；通知主题一眼明确问题（`[DBCheck][宕机] 实例(地址) 错误摘要`）。修复采集快照缺 `id` 字段导致状态机空转的缺陷。
 - **通知密码加密根修（678aa95）**：根治「解密邮件密码失败」——`_save_config` 整节点替换曾把首次生成的加密密钥冲掉致密文永久解不开；现显式保留密钥、配置文件原子写（tmp+os.replace）、解密路径不再生成密钥、配置持续损坏时拒绝保存（防清空其他配置节点）、失败提示记忆化只打一次且可操作。
