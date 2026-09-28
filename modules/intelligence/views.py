@@ -829,3 +829,170 @@ def bicqa_awr_analyze():
                         "meta": {k: meta.get(k, "") for k in ("db_name", "instance", "snap_range")}})
     except Exception as e:  # 兜底：任何意外都不击穿通道
         return jsonify({"ok": False, "error_code": "BICQA_ERROR", "error": str(e)})
+
+
+# ── 安全自治 DBA 闭环（P0-b：闭环编排器接口） ──────────────────────────────
+@intelligence_bp.route("/api/intelligence/autonomy/run", methods=["POST"])
+def autonomy_run_ep():
+    """触发一次自治闭环：感知 → 诊断 → 写类提案 → 落 SQL 审计 pending_approval。
+
+    入参：instance_id（必填）、severity_threshold（默认 warning）、max_iter、submitter。
+    P0 默认 human-in-the-loop：写类动作停在 pending_approval，需人工审批后由 execute 接口续跑。
+    受全局熔断开关约束：kill_switch=false 时拒绝新建闭环（返回 423）。
+    """
+    data = request.get_json(silent=True) or {}
+    instance_id = (data.get("instance_id") or "").strip()
+    if not instance_id:
+        return jsonify({"ok": False, "msg": "instance_id required"}), 400
+    # 全局熔断开关检查
+    try:
+        from .workflow_store import get_autonomy_config as _cfg
+        if not _cfg().get("kill_switch", True):
+            return jsonify({"ok": False, "msg": "自治闭环已被全局熔断开关关闭，无法新建闭环。",
+                            "error_code": "AUTONOMY_DISABLED"}), 423
+    except Exception:
+        pass  # 配置读取失败时默认可用，不阻断主流程
+    try:
+        from .autonomy import AutonomyLoop
+
+        loop = AutonomyLoop()
+        result = loop.run_for_instance(
+            instance_id,
+            severity_threshold=data.get("severity_threshold") or "warning",
+            max_iter=data.get("max_iter"),
+            submitter=data.get("submitter") or "autonomy-bot",
+        )
+        if not result.get("ok"):
+            return jsonify({"ok": False, "msg": result.get("detail") or result.get("error_code"),
+                            "run_id": result.get("run_id")}), 422
+        return jsonify({"ok": True, **result})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+@intelligence_bp.route("/api/intelligence/autonomy/runs", methods=["GET"])
+def autonomy_runs_ep():
+    """列出自治闭环 run（可按 state / instance_id 过滤）。"""
+    try:
+        from .workflow_store import list_autonomy_runs as _list
+
+        state = (request.args.get("state") or "").strip() or None
+        instance_id = (request.args.get("instance_id") or "").strip() or None
+        runs = _list(status=state, instance_id=instance_id)
+        return jsonify({"ok": True, "runs": runs, "total": len(runs)})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+@intelligence_bp.route("/api/intelligence/autonomy/runs/<int:run_id>", methods=["GET"])
+def autonomy_run_detail_ep(run_id: int):
+    """单条自治闭环详情（含种子发现、提案、审计任务、复检结论）。"""
+    try:
+        from .workflow_store import get_autonomy_run as _get
+
+        run = _get(run_id)
+        if not run:
+            return jsonify({"ok": False, "msg": "run not found"}), 404
+        return jsonify({"ok": True, "run": run})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+@intelligence_bp.route("/api/intelligence/autonomy/runs/<int:run_id>/execute", methods=["POST"])
+def autonomy_run_execute_ep(run_id: int):
+    """续跑一条已审批（或待审批）的闭环：执行写类任务 → 复检 → 置 resolved/reopened。
+
+    入参：approver（必填，审批人）、reinspect（可选 bool，默认 false，是否先触发真实重巡检）。
+    """
+    data = request.get_json(silent=True) or {}
+    approver = (data.get("approver") or "").strip()
+    if not approver:
+        return jsonify({"ok": False, "msg": "approver required"}), 400
+    try:
+        from .autonomy import AutonomyLoop
+
+        loop = AutonomyLoop()
+        result = loop.execute_run(
+            run_id, approver,
+            reinspect=bool(data.get("reinspect")),
+            sql_overrides=data.get("sql_overrides") or None,
+        )
+        if not result.get("ok"):
+            return jsonify({"ok": False, "msg": result.get("detail") or result.get("error_code"),
+                            "state": result.get("state")}), 422
+        return jsonify({"ok": True, **result})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+@intelligence_bp.route("/api/intelligence/autonomy/runs/<int:run_id>/reopen", methods=["POST"])
+def autonomy_run_reopen_ep(run_id: int):
+    """重新打开一条已驳回（rejected）的闭环：修订 SQL 后再次提交审批。
+
+    入参：approver（必填）、sql_overrides（可选，{task_id: sql_text}）。
+    """
+    data = request.get_json(silent=True) or {}
+    approver = (data.get("approver") or "").strip()
+    if not approver:
+        return jsonify({"ok": False, "msg": "approver required"}), 400
+    try:
+        from .autonomy import AutonomyLoop
+
+        loop = AutonomyLoop()
+        result = loop.reopen_run(run_id, approver, sql_overrides=data.get("sql_overrides") or None)
+        if not result.get("ok"):
+            return jsonify({"ok": False, "msg": result.get("detail") or result.get("error_code"),
+                            "state": result.get("state")}), 422
+        return jsonify({"ok": True, **result})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+@intelligence_bp.route("/api/intelligence/autonomy/runs/<int:run_id>/reject", methods=["POST"])
+def autonomy_run_reject_ep(run_id: int):
+    """驳回一条待审批 / 已批准（未执行）的闭环。
+
+    入参：approver（必填）、comment（可选，驳回意见）。对每条仍可驳回的审计任务调用
+    WriteGate resolve(reject)，闭环置终态 rejected。
+    """
+    data = request.get_json(silent=True) or {}
+    approver = (data.get("approver") or "").strip()
+    if not approver:
+        return jsonify({"ok": False, "msg": "approver required"}), 400
+    try:
+        from .autonomy import AutonomyLoop
+
+        loop = AutonomyLoop()
+        result = loop.reject_run(run_id, approver, comment=(data.get("comment") or "").strip())
+        if not result.get("ok"):
+            return jsonify({"ok": False, "msg": result.get("detail") or result.get("error_code"),
+                            "state": result.get("state")}), 422
+        return jsonify({"ok": True, **result})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+@intelligence_bp.route("/api/intelligence/autonomy/config", methods=["GET"])
+def autonomy_config_ep():
+    """读取安全自治闭环全局配置（含 kill_switch 熔断开关）。"""
+    try:
+        from .workflow_store import get_autonomy_config as _cfg
+        return jsonify(_cfg())
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+@intelligence_bp.route("/api/intelligence/autonomy/config", methods=["POST"])
+def autonomy_config_set_ep():
+    """设置安全自治闭环全局开关（熔断）。kill_switch=false 即熔断，拒绝新建闭环。
+
+    入参：kill_switch（bool，必填）。
+    """
+    data = request.get_json(silent=True) or {}
+    if "kill_switch" not in data:
+        return jsonify({"ok": False, "msg": "kill_switch required"}), 400
+    try:
+        from .workflow_store import set_autonomy_config as _set
+        return jsonify(_set(bool(data["kill_switch"])))
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500

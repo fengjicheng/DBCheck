@@ -35,6 +35,21 @@ JDBC_BATCH_DB_TYPES = frozenset(('gbase', 'db2', 'clickhouse'))
 JDBC_BATCH_TTL = 12.0        # 批量结果缓存时长（s），略短于采样间隔 15s
 JDBC_BATCH_TIMEOUT = 90      # 子进程硬超时（含 JVM 冷启动 4~10s）
 
+# ── JDBC 专属数据源（*_jdbc）─────────────────────────────────
+# 这些类型被用户配置成 *_jdbc 的原因就是「python 原生驱动连不上」（旧版
+# Oracle / TCPS / EZConnect / TNS 别名等），且 jdbc_url 优先于 host/port
+# （见 instance_manager 字段注释）；metrics_collector 侧早有约定
+# 「oracle_jdbc 一律走插件 JDBC，绝不走 oracledb」。监控引擎此前把它们
+# 归一成 oracle/pg 走 oracledb thin / psycopg2 直连 → 实时监控（pro collector，
+# 走 JDBC 插件）有数据、监控大屏（MonitorEngine）判宕机。
+# 修复：路由进 JDBC 批量子进程通道（主进程绝不起 JVM）；连接器用原始插件
+# id（oracle_jdbc/uxdb），采集 SQL 模板用归一键（oracle/pg）。
+JDBC_ONLY_TYPES = {
+    # raw db_type   → (JDBC 连接器 db_type, monitor 模板键)
+    'oracle_jdbc': ('oracle_jdbc', 'oracle'),
+    'uxdb_jdbc':   ('uxdb',        'pg'),
+}
+
 
 # ── 驱动异常 → 友好提示 ──────────────────────────────────────
 # 驱动原始异常（如 "<class 'dmPython.Connection'> returned a result with
@@ -385,12 +400,14 @@ class MonitorEngine:
             _add(s)
         return sqls
 
-    def _jdbc_query(self, inst, db_type, sql, timeout=None):
+    def _jdbc_query(self, inst, db_type, sql, timeout=None, template_key=None):
         """JDBC 批量通道查询单条 SQL：结果来自每轮一次的子进程批量采集缓存。
 
         首个调用方（引擎采集线程或大屏采样线程）触发一次子进程批量执行，
         同轮内其余查询（含另一侧线程的 run_query）直接读缓存，避免每条 SQL
         都冷启动一次 JVM（4~10s）。inst 为已解密实例 dict。
+        ``template_key``：采集 SQL 模板键（oracle/pg 等），缺省同 db_type；
+        *_jdbc 专属类型的连接器 id 与模板键不同（oracle_jdbc vs oracle）。
         """
         instance_id = inst.get('id')
         cache = self._jdbc_cache.get(instance_id)
@@ -402,7 +419,8 @@ class MonitorEngine:
             cache = self._jdbc_cache.get(instance_id)
             if cache and time.time() - cache['ts'] <= JDBC_BATCH_TTL:
                 return self._jdbc_pick(cache['res'], sql)
-            res = self._jdbc_run_batch(inst, db_type, timeout)
+            res = self._jdbc_run_batch(inst, db_type, timeout,
+                                       template_key=template_key)
             self._jdbc_cache[instance_id] = {'ts': time.time(), 'res': res,
                                              'lock': lock}
             return self._jdbc_pick(res, sql)
@@ -417,11 +435,13 @@ class MonitorEngine:
             raise RuntimeError(entry[1])
         return entry
 
-    def _jdbc_run_batch(self, inst, db_type, timeout=None):
+    def _jdbc_run_batch(self, inst, db_type, timeout=None, template_key=None):
         """spawn 隔离子进程，一次跑完该实例本轮全部采集 SQL。
 
         参数经 stdin 临时文件传入（密码不进进程列表），结果取 stdout 中
         最后一个以 { 开头的行（与 jdbc_test_cli / jdbc_metrics_cli 同源约定）。
+        ``db_type`` 传给 JDBC 连接器（原始插件 id，如 oracle_jdbc/uxdb）；
+        ``template_key`` 决定采集 SQL 模板集合（oracle/pg 等），缺省同 db_type。
         """
         import subprocess as _sp
         import tempfile as _tf
@@ -432,7 +452,7 @@ class MonitorEngine:
             cmd = [sys.executable, os.path.join(
                 str(PROJECT_ROOT), 'modules', 'monitor', 'jdbc_collect_cli.py')]
 
-        sqls = self._jdbc_batch_sqls(db_type)
+        sqls = self._jdbc_batch_sqls(template_key or db_type)
         payload = {
             'db_type': db_type,
             'host': inst.get('host'),
@@ -536,7 +556,15 @@ class MonitorEngine:
         # 归一到模板键（oracle_jdbc→oracle、tdsqlc_mysql→mysql 等）再分派：
         # _create_connection 的 python 驱动分支按协议族分派（TDSQL-C 兼容 MySQL
         # 协议、oracle_jdbc 实例字段与 oracle 相同），与 jdbc 插件 id 无关。
-        db_type = mq.normalize_db_type(inst['db_type'])
+        raw_type = (inst.get('db_type') or '').strip().lower()
+        db_type = mq.normalize_db_type(raw_type)
+
+        # *_jdbc 专属数据源：必须走 JDBC 子进程通道，绝不能被归一成
+        # oracle/pg 后用 python 原生驱动直连（否则实时监控有数据、大屏判宕机）
+        if raw_type in JDBC_ONLY_TYPES:
+            conn_type, tmpl_key = JDBC_ONLY_TYPES[raw_type]
+            return self._jdbc_query(inst, conn_type, sql, timeout=timeout,
+                                    template_key=tmpl_key)
 
         # gbase/db2/clickhouse：JDBC 批量子进程通道（主进程绝不起 JVM）
         if db_type in JDBC_BATCH_DB_TYPES:

@@ -433,6 +433,30 @@ class DiagnosticHub:
                 "gate_decisions": [],
             }
 
+    def run_autonomous(self, seed_findings, instance_id: str, max_iter: int = None) -> dict:
+        """自治闭环入口：以机器对机器的巡检发现(seed_findings)为种子做协同诊断。
+
+        与 dispatch 的唯一差别：
+          * 输入是 Finding 列表（或 Finding 形状 dict），而非自然语言 goal；
+          * 非流式，专供 modules.intelligence.autonomy 编排闭环调用；
+          * 复用 _prepare / _run_iterative / _review / _finalize，零新建决策逻辑。
+
+        seed_findings 中的发现会被注入共享上下文 ctx.findings，使迭代重规划
+        （replan）能据此追加专项处置能力（如慢查询=high → 索引顾问）。
+        """
+        ctx, plan = self._prepare("基于巡检发现做自治处置", instance_id, {})
+        for f in (seed_findings or []):
+            if isinstance(f, Finding):
+                ctx.add(f)
+            elif isinstance(f, dict):
+                keys = ("source", "category", "severity", "title",
+                        "detail", "suggestion", "tags")
+                ctx.add(Finding(**{k: f.get(k) for k in keys}))
+        max_iter = self._resolve_max_iter(ctx, max_iter)
+        plan = self._run_iterative(ctx, plan, max_iter)
+        self._review(ctx)
+        return self._finalize(ctx, plan)
+
     def dispatch_stream(self, goal: str, instance_id: str, inputs: dict = None,
                         max_iter: int = None):
         """生成器版本：先产出协调员决策，再逐个专员执行并推送进度，最后完整结果。

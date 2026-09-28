@@ -57,6 +57,7 @@ menus_data = [
     ('schema-dict',       'menu.schema-dict',      0, 581),
     ('diag-history',      'menu.diag-history',     0, 59),
     ('sql-audit',         'menu.sql-audit',        0, 60),
+    ('autonomy',         'menu.autonomy',          0, 61),
     ('data-management',  'menu.data-management', 0, 66),
     ('about',            'menu.about',           0, 67),
     ('disaster-recovery','menu.disaster-recovery',0, 65),

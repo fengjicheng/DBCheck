@@ -3346,6 +3346,7 @@ EN.update({
     "menu.shares": "Share Management",
     "menu.sql-editor": "SQL Editor",
     "menu.sql-audit": "SQL Audit",
+    "menu.autonomy": "Safe Autonomy",
     "menu.trend": "Trend Analysis",
     "menu.wizard": "Database Inspection",
 

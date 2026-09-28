@@ -3376,6 +3376,7 @@ ZI.update({
     "menu.shares": "共享管理",
     "menu.sql-editor": "SQL编辑器",
     "menu.sql-audit": "SQL审计",
+    "menu.autonomy": "安全自治",
     "menu.trend": "趋势分析",
     "menu.wizard": "数据库巡检",
 
