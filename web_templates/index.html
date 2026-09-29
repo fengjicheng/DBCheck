@@ -15622,7 +15622,7 @@ async function openFleetDrawer(iid) {
 
   // ④ 联动自治闭环
   html += '<div class="fl-sec"><h4>④ 联动处置</h4><div class="fl-item">以漂移/容量事件为种子触发<b>安全自治闭环</b>（诊断 → 写类提案 → 人工审批闸门）。</div>' +
-    '<button class="btn btn-primary" style="padding:7px 16px" onclick="fleetTriggerAutonomy(\'' + iid + '\')">⚡ 触发自治闭环</button></div>';
+    '<button class="btn btn-primary" style="padding:7px 16px" onclick="fleetTriggerAutonomy(\'' + iid + '\', this)">⚡ 触发自治闭环</button></div>';
 
   body.innerHTML = html;
 
@@ -15679,8 +15679,11 @@ function closeFleetDrawer() {
   if (mask) mask.classList.remove('open');
 }
 
-async function fleetTriggerAutonomy(iid) {
+async function fleetTriggerAutonomy(iid, btn) {
   try {
+    // 闭环为同步接口（感知→诊断→提案约需数十秒），必须立即给按钮反馈，否则像「没反应」
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ 诊断执行中…'; }
+    toast('正在触发自治闭环：诊断 → 写类提案 → 审批闸门，约需数十秒，请勿关闭页面');
     const res = await fetch('/api/intelligence/autonomy/run', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ instance_id: iid, submitter: 'fleet-bot' })
@@ -15690,6 +15693,9 @@ async function fleetTriggerAutonomy(iid) {
     toastSuccess('自治闭环 #' + d.run_id + ' 已创建（状态 ' + d.state + '），请到「安全自治」页查看');
     closeFleetDrawer();
   } catch (e) { toastError('触发失败: ' + e.message); }
+  finally {
+    if (btn) { btn.disabled = false; btn.textContent = '⚡ 触发自治闭环'; }
+  }
 }
 
 // ─── P2 拓扑巡检（DB Twin） ─────────────────────────────────────────────
@@ -15909,7 +15915,7 @@ function openTwinDrawer(iid) {
   }
   // ④ 联动处置
   html += '<div class="fl-sec"><h4>④ 联动处置</h4><div style="display:flex;gap:8px;flex-wrap:wrap">' +
-    '<button class="btn btn-primary" style="padding:7px 14px" onclick="fleetTriggerAutonomy(\'' + iid + '\')">⚡ 触发自治闭环</button>' +
+    '<button class="btn btn-primary" style="padding:7px 14px" onclick="fleetTriggerAutonomy(\'' + iid + '\', this)">⚡ 触发自治闭环</button>' +
     '<button class="btn btn-ghost" style="padding:7px 14px" onclick="showPage(\'fleet\');openFleetDrawer(\'' + iid + '\')">🔍 基线下钻</button>' +
     (replayed ? '' : '<button class="btn btn-ghost" style="padding:7px 14px" onclick="fleetLearnOne(\'' + iid + '\', this)">🧠 学习基线</button>') +
     '</div></div>';
