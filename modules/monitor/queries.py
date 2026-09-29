@@ -31,6 +31,8 @@ ORDER BY d.avg_timer_wait DESC
 LIMIT 30
 """
 
+# ⚠️ 兼容性：窗口函数需 MySQL 8.0+（5.7 报 1064 → 连接采集无 fallback → 大屏误判宕机）。
+# 每用户连接数改用派生表 JOIN（information_schema 聚合），5.7 / 8.0 通用。
 MYSQL_CONNECTION_SQL = """
 SELECT
     p.user AS username,
@@ -39,9 +41,12 @@ SELECT
     ROUND(p.time / 3600, 1) AS duration_h,
     p.state,
     p.info AS current_sql,
-    COUNT(*) OVER (PARTITION BY p.user) AS user_conn_count,
+    COALESCE(u.cnt, 0) AS user_conn_count,
     (SELECT COUNT(*) FROM information_schema.processlist) AS total_connections
 FROM information_schema.processlist p
+LEFT JOIN (SELECT user, COUNT(*) AS cnt
+           FROM information_schema.processlist GROUP BY user) u
+       ON u.user = p.user
 WHERE p.id != CONNECTION_ID()
 ORDER BY p.time DESC
 LIMIT 50

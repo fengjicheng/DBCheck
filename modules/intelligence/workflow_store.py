@@ -153,6 +153,55 @@ def delete_workflow(wf_id: int) -> bool:
             conn.close()
 
 
+# ── P1：工作流市场（导出 / 导入 / 内置模板） ─────────────────────────────
+
+MARKET_SCHEMA_VERSION = 1
+
+
+def export_workflow(wf_id: int) -> Optional[Dict[str, Any]]:
+    """导出工作流为可分享的 JSON 载荷（市场资产格式）。
+
+    载荷不含实例敏感信息（只有编排结构），可安全外发。
+    """
+    wf = get_workflow(wf_id)
+    if not wf:
+        return None
+    return {
+        "schema": "dbcheck.workflow",
+        "schema_version": MARKET_SCHEMA_VERSION,
+        "name": wf["name"],
+        "description": wf.get("description") or "",
+        "steps": wf["steps"],
+        "edges": wf["edges"],
+        "exported_at": _now(),
+    }
+
+
+def import_workflow(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """导入一个市场载荷。同名自动加「（导入）」后缀去重。
+
+    结构校验复用 ``save_workflow``；返回 ``{"ok", "workflow"/"error"}``。
+    """
+    if not isinstance(payload, dict) or payload.get("schema") != "dbcheck.workflow":
+        return {"ok": False, "error": "不是有效的 DBCheck 工作流文件（schema 不符）"}
+    steps = payload.get("steps") or []
+    edges = payload.get("edges") or []
+    if not steps:
+        return {"ok": False, "error": "载荷中没有节点"}
+    name = (payload.get("name") or "").strip() or "导入的工作流"
+    existing = {w["name"] for w in list_workflows()}
+    final = name
+    n = 0
+    while final in existing:
+        n += 1
+        final = "%s（导入%d）" % (name, n)
+    try:
+        wf = save_workflow(name=final, steps=steps, edges=edges)
+        return {"ok": True, "workflow": wf}
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # P0-b：安全自治 DBA 闭环状态表（autonomy_runs）
 # 与 workflows 同库、独立表，不污染 workflow schema（设计文档 4：闭环状态机）。

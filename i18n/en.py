@@ -3347,6 +3347,8 @@ EN.update({
     "menu.sql-editor": "SQL Editor",
     "menu.sql-audit": "SQL Audit",
     "menu.autonomy": "Safe Autonomy",
+    "menu.fleet": "Smart Baseline",
+    "menu.twin": "Topology Inspection",
     "menu.trend": "Trend Analysis",
     "menu.wizard": "Database Inspection",
 

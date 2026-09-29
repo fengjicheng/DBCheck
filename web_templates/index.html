@@ -3581,7 +3581,7 @@ async function executeFixSql(taskId, sql) {
 <body data-page-node-id="Z8wXYH3Kq2Lmo04jsdprwJ">
 <div class="app-layout" data-page-node-id="jyhASvy4sIJW4QwFDK2QUg">
 <!-- 左侧：主内容区（侧边栏 + 页面内容） -->
-<div class="main-content" data-page-node-id="ad96uAIHe8MmWxJ4SSMXAi">
+<div class="main-content ai-panel-collapsed" data-page-node-id="ad96uAIHe8MmWxJ4SSMXAi">
 <!-- 背景层 -->
 <div class="bg-anim" data-page-node-id="Apghcp2CSGnKrZhVN88GbA">
   <svg viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg" data-page-node-id="o0oy9GQr125N09PnrIAiiL">
@@ -4765,6 +4765,7 @@ async function loadWorkflowNodes() {
     var data = await res.json();
     window.__wfSpecialists = (data.ok && data.specialists) || [];
     window.__wfSkills = (data.ok && data.skills) || [];
+    window.__wfComponents = (data.ok && data.components) || [];
     window.__wfNodesReady = true;
     wfRenderPalette();
   } catch(e) { toastError('加载节点清单失败：' + e.message); }
@@ -4775,8 +4776,39 @@ function wfRefOptions(kind) {
   if (kind === 'specialist') list = (window.__wfSpecialists || []).filter(function(s){ return s.id !== 'coordinator'; }).map(function(s){ return {v: s.id, t: s.name}; });
   else if (kind === 'skill') list = (window.__wfSkills || []).map(function(s){ return {v: s.ref || s.name, t: (s.title || s.name) + (s.requires_approval ? ' (需审批)' : '')}; });
   else if (kind === 'hub') list = [{v: 'hub', t: '诊断(hub)'}];
+  else if (kind === 'inspect') list = (window.__wfComponents || []).map(function(c){ return {v: c.id, t: '[' + (c.db_type||'') + '] ' + c.title}; });
   if (!list.length) list = [{v: '', t: '（无需 ref）'}];
   return list;
+}
+
+function wfCompDbType(ref) {
+  // 巡检组件 ref → 库型（非组件 ref 返回 ''）
+  var comps = window.__wfComponents || [];
+  for (var i = 0; i < comps.length; i++) if (comps[i].id === ref) return comps[i].db_type || '';
+  return '';
+}
+
+function wfCanvasDbTypes() {
+  // 画布上巡检组件覆盖的库型集合（去重）
+  var set = {};
+  __wfSteps.forEach(function(s){
+    if (s.kind === 'inspect' && s.ref) {
+      var d = wfCompDbType(s.ref);
+      if (d) set[d] = true;
+    }
+  });
+  return Object.keys(set);
+}
+
+function wfMixedDbConflict(newRef) {
+  // 拖入/切换到 newRef 后是否会与画布上已有组件库型冲突；冲突返回 {new, existing}，否则 null
+  var ndb = newRef ? wfCompDbType(newRef) : '';
+  if (!ndb) return null;
+  var dbs = wfCanvasDbTypes();
+  var hasSame = dbs.indexOf(ndb) >= 0;
+  var others = dbs.filter(function(d){ return d !== ndb; });
+  if (!hasSame && others.length) return { new: ndb, existing: others.join('、') };
+  return null;
 }
 
 function wfIconSvg(kind, domain) {
@@ -4787,7 +4819,8 @@ function wfIconSvg(kind, domain) {
     hub:    '<path d="M3 12h4l3 8 4-16 3 8h4"/>',
     skill:  '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10"/>',
     func:   '<path d="M9 3H7a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h2v4a2 2 0 0 1-2 2H5"/><path d="M15 21h2a2 2 0 0 0 2-2v-4a2 2 0 0 0-2-2h-2v-4a2 2 0 0 1 2-2h2"/>',
-    output: '<path d="M4 4h16v16H4z"/><path d="m4 4 8 6 8-6"/>'
+    output: '<path d="M4 4h16v16H4z"/><path d="m4 4 8 6 8-6"/>',
+    inspect:'<path d="M9 11l3 3 8-8"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>'
   };
   var domainIcon = {
     sql:           '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/>',
@@ -4810,6 +4843,7 @@ function wfRenderPalette() {
   if (!box) return;
   var specs = window.__wfSpecialists || [];
   var skills = window.__wfSkills || [];
+  var comps = window.__wfComponents || [];
   var groups = [];
   // 基础控制
   groups.push({
@@ -4820,6 +4854,13 @@ function wfRenderPalette() {
       {kind: 'end', label: '结束', ref: ''}
     ]
   });
+  // 巡检组件（章节级，P1 组件化）：单组收纳，条目上挂库型徽章，避免按库型拆多组把面板拉长
+  if (comps.length) {
+    var citems = comps.map(function(c){
+      return {kind: 'inspect', label: c.title, ref: c.id, domain: 'inspection', db: c.db_type || '通用'};
+    }).sort(function(a, b){ return (a.db === b.db) ? a.label.localeCompare(b.label) : a.db.localeCompare(b.db); });
+    groups.push({key: 'inspect', title: '巡检组件', items: citems});
+  }
   // 专家能力按 domain 分组（排除协调员，用户自己编排不需要它）
   var domainMap = {};
   specs.forEach(function(s){
@@ -4840,16 +4881,24 @@ function wfRenderPalette() {
       })
     });
   }
-  // 渲染：分组标题 + 两列网格，全部默认展开，SVG 图标 + 标题卡片
+  // 渲染：可折叠分组标题（含计数徽章）+ 紧凑单行条目；默认仅「基础控制」展开，其余折叠
   var html = '';
   groups.forEach(function(g){
-    html += '<div class="wf-palette-group" data-group="' + escHtml(g.key) + '">' +
-      '<div class="wf-palette-title"><span>' + escHtml(g.title) + '</span></div>' +
+    if (window.__wfOpen === undefined) window.__wfOpen = {};
+    var open = (window.__wfOpen[g.key] !== undefined) ? window.__wfOpen[g.key] : (g.key === 'basic');
+    html += '<div class="wf-palette-group" data-group="' + escHtml(g.key) + '" data-open="' + (open ? '1' : '0') + '">' +
+      '<div class="wf-palette-title" onclick="wfToggleGroup(this)">' +
+        '<span class="chevron">▸</span>' +
+        '<span class="gt">' + escHtml(g.title) + '</span>' +
+        '<span class="gcount">' + g.items.length + '</span>' +
+      '</div>' +
       '<div class="wf-palette-items">';
     g.items.forEach(function(it){
-      html += '<div class="wf-palette-item" draggable="true" data-kind="' + escHtml(it.kind) + '" data-ref="' + escHtml(it.ref || '') + '" data-label="' + escHtml(it.label || '') + '" title="' + escHtml(it.label || '') + '">' +
+      html += '<div class="wf-palette-item" draggable="true" data-kind="' + escHtml(it.kind) + '" data-ref="' + escHtml(it.ref || '') + '" data-label="' + escHtml(it.label || '') + '" data-db="' + escHtml(it.db || '') + '" title="' + escHtml((it.db ? '[' + it.db + '] ' : '') + (it.label || '')) + '">' +
         '<span class="pi-ico">' + wfIconSvg(it.kind, it.domain) + '</span>' +
-        '<span class="pi-name">' + escHtml(it.label) + '</span></div>';
+        '<span class="pi-name">' + escHtml(it.label) + '</span>' +
+        (it.db ? '<span class="pi-db">' + escHtml(it.db) + '</span>' : '') +
+      '</div>';
     });
     html += '</div></div>';
   });
@@ -4867,7 +4916,11 @@ function wfRenderPalette() {
 }
 
 function wfToggleGroup(titleEl) {
-  // 组件库已默认全部展开，无需折叠
+  var g = titleEl.parentElement;
+  var open = g.dataset.open === '1';
+  g.dataset.open = open ? '0' : '1';
+  if (window.__wfOpen === undefined) window.__wfOpen = {};
+  window.__wfOpen[g.dataset.group] = !open;
 }
 
 function wfFilterPalette(q) {
@@ -4875,12 +4928,14 @@ function wfFilterPalette(q) {
   var items = document.querySelectorAll('.wf-palette-item');
   var groups = document.querySelectorAll('.wf-palette-group');
   items.forEach(function(it){
-    var txt = (it.dataset.label + ' ' + it.dataset.ref).toLowerCase();
+    var txt = (it.dataset.label + ' ' + it.dataset.ref + ' ' + (it.dataset.db || '')).toLowerCase();
     it.style.display = txt.indexOf(q) >= 0 ? '' : 'none';
   });
   groups.forEach(function(g){
     var visible = Array.from(g.querySelectorAll('.wf-palette-item')).some(function(it){ return it.style.display !== 'none'; });
     g.style.display = (q && !visible) ? 'none' : '';
+    // 搜索时自动展开有命中的分组，便于直接看到结果
+    if (q && visible) g.dataset.open = '1';
   });
 }
 
@@ -4896,6 +4951,11 @@ function wfGenLabel(kind) {
 }
 
 function wfAddNodeAt(kind, ref, x, y, presetLabel) {
+  // 跨库型拖入提醒（非阻断）：同一画布混用不同库型的巡检组件，执行时非当前实例库型的组件会失败
+  if (kind === 'inspect' && ref) {
+    var mm = wfMixedDbConflict(ref);
+    if (mm) toastError('库型不一致：新组件是「' + mm.new + '」，画布上已有「' + mm.existing + '」组件，混合保存后执行会失败');
+  }
   var id = wfGenId(kind);
   var label = presetLabel || wfGenLabel(kind);
   // 如果 presetLabel 已被占用，递增
@@ -5064,7 +5124,15 @@ function wfRenderProps() {
     wfRenderCanvas();
   });
   var refSel = document.getElementById('wf-p-ref');
-  if (refSel) refSel.addEventListener('change', function(){ s.ref = this.value; wfRenderCanvas(); });
+  if (refSel) refSel.addEventListener('change', function(){
+    s.ref = this.value;
+    // 切换引用后库型可能变化，与画布其他巡检组件冲突时提醒
+    if (s.kind === 'inspect') {
+      var mm = wfMixedDbConflict(s.ref);
+      if (mm) toastError('库型不一致：该组件是「' + mm.new + '」，画布上已有「' + mm.existing + '」组件，混合保存后执行会失败');
+    }
+    wfRenderCanvas();
+  });
   var actSel = document.getElementById('wf-p-action');
   if (actSel) actSel.addEventListener('change', function(){ s.args = s.args || {}; s.args.action = this.value; });
   var toSel = document.getElementById('wf-p-to');
@@ -5251,6 +5319,18 @@ async function wfSave() {
   __wfEdges.forEach(function(e){ incident[e[0]] = true; incident[e[1]] = true; });
   var isolated = __wfSteps.filter(function(s){ return !incident[s.id]; }).map(function(s){ return s.label; });
   if (isolated.length) { toastError('存在未连线的孤立节点：' + isolated.join('、')); return; }
+  // 混合库型巡检组件检查：不同库型的组件无法在同一实例上同时生效，保存前确认
+  var dbs = wfCanvasDbTypes();
+  if (dbs.length > 1) {
+    var keep = await showConfirmDialog(
+      '混合库型巡检组件',
+      '该工作流包含 ' + dbs.length + ' 种数据库类型的巡检组件（' + dbs.join('、') + '）。\n\n' +
+      '工作流执行时只针对一个实例，其余库型组件的查询会全部失败、产生无效结果。\n\n' +
+      '跨库型通用编排建议：在该组件节点的参数 JSON 中改用 match_title（按标题匹配），运行时自动匹配当前实例的库型。\n\n' +
+      '仍要保存吗？'
+    );
+    if (!keep) return;
+  }
   var steps = __wfSteps.map(function(s){ return { id: s.id, label: s.label, kind: s.kind, ref: s.ref || '', args: s.args || {}, x: s.x, y: s.y }; });
   var edges = __wfEdges.map(function(e){ return [e[0], e[1]]; });
   try {
@@ -5296,7 +5376,7 @@ async function loadWorkflows() {
     box.innerHTML = d.workflows.map(function(w){
       var nc = (w.steps ? w.steps.length : 0);
       var ec = (w.edges ? w.edges.length : 0);
-      return '<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin:8px 0;background:var(--surface2)"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div><b>' + escHtml(w.name) + '</b> <span class="badge">' + nc + ' 节点</span>' + (ec ? ' <span class="badge">' + ec + ' 连线</span>' : '') + '</div><div style="display:flex;gap:6px"><button class="btn btn-ghost" style="font-size:12px;padding:3px 9px" onclick="wfLoad(' + w.id + ')">编辑</button><button class="btn btn-primary" style="font-size:12px;padding:3px 9px" onclick="wfShowRun(' + w.id + ')">执行</button><button class="btn btn-ghost" style="color:#EF4444;font-size:12px;padding:3px 9px" onclick="wfDelete(' + w.id + ')">删除</button></div></div></div>';
+      return '<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin:8px 0;background:var(--surface2)"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div><b>' + escHtml(w.name) + '</b> <span class="badge">' + nc + ' 节点</span>' + (ec ? ' <span class="badge">' + ec + ' 连线</span>' : '') + '</div><div style="display:flex;gap:6px"><button class="btn btn-ghost" style="font-size:12px;padding:3px 9px" onclick="wfLoad(' + w.id + ')">编辑</button><button class="btn btn-primary" style="font-size:12px;padding:3px 9px" onclick="wfShowRun(' + w.id + ')">执行</button><button class="btn btn-ghost" style="font-size:12px;padding:3px 9px" onclick="wfExport(' + w.id + ')" title="导出为可分享 JSON">导出</button><button class="btn btn-ghost" style="color:#EF4444;font-size:12px;padding:3px 9px" onclick="wfDelete(' + w.id + ')">删除</button></div></div></div>';
     }).join('');
   } catch(e) { toastError('加载列表失败：' + e.message); }
 }
@@ -5346,6 +5426,91 @@ async function wfDelete(id) {
     toastSuccess('已删除');
     loadWorkflows();
   } catch(e) { toastError('删除失败：' + e.message); }
+}
+
+// ── P1 工作流市场：导出 / 导入 / 内置模板 ───────────────────────────
+
+async function wfExport(id) {
+  try {
+    const res = await fetch('/api/intelligence/workflows/' + id + '/export');
+    const d = await res.json();
+    if (!d.ok) { toastError(d.msg || '导出失败'); return; }
+    const blob = new Blob([JSON.stringify(d.payload, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (d.payload.name || 'workflow') + '.dbcheck-wf.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toastSuccess('已导出（可分享给社区/伙伴）');
+  } catch(e) { toastError('导出失败：' + e.message); }
+}
+
+async function wfOpenMarket() {
+  let modal = document.getElementById('wf-market-mask');
+  if (modal) { modal.style.display = 'flex'; }
+  else {
+    modal = document.createElement('div');
+    modal.id = 'wf-market-mask';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;display:flex;align-items:center;justify-content:center';
+    modal.innerHTML = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;width:min(680px,92vw);max-height:82vh;overflow:auto;padding:18px 20px">' +
+      '<div style="display:flex;align-items:center;margin-bottom:12px"><b style="font-size:15px">📦 工作流模板市场</b>' +
+      '<button class="btn btn-ghost" style="margin-left:auto;font-size:12px;padding:4px 10px" onclick="document.getElementById(\'wf-market-mask\').style.display=\'none\'">关闭</button></div>' +
+      '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">模板 = 运维 runbook as code：不携带实例信息，导入后按目标实例库型动态解析巡检组件。也支持从文件导入社区模板。</div>' +
+      '<div style="display:flex;gap:8px;margin-bottom:10px"><input type="file" id="wf-import-file" accept=".json" style="font-size:12px"><button class="btn btn-ghost" style="font-size:12px;padding:4px 12px" onclick="wfImportFile()">📥 从文件导入</button></div>' +
+      '<div id="wf-market-list"><div style="font-size:12.5px;color:var(--text-muted)">加载中…</div></div></div>';
+    document.body.appendChild(modal);
+    modal.addEventListener('click', function(e){ if (e.target === modal) modal.style.display = 'none'; });
+  }
+  try {
+    const res = await fetch('/api/intelligence/market/builtin');
+    const d = await res.json();
+    const box = document.getElementById('wf-market-list');
+    if (!d.ok || !(d.templates || []).length) { box.innerHTML = '<div style="font-size:12.5px;color:var(--text-muted)">暂无内置模板</div>'; return; }
+    box.innerHTML = d.templates.map(function(t, i){
+      var kinds = {};
+      (t.steps || []).forEach(function(s){ kinds[s.kind] = (kinds[s.kind] || 0) + 1; });
+      var badge = Object.keys(kinds).map(function(k){ return '<span class="badge">' + k + '×' + kinds[k] + '</span>'; }).join(' ');
+      return '<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin:8px 0;background:var(--surface2)">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div><b>' + escHtml(t.name) + '</b> ' + badge + '</div>' +
+        '<button class="btn btn-primary" style="font-size:12px;padding:4px 12px" onclick="wfImportBuiltin(' + i + ')">导入</button></div>' +
+        '<div style="font-size:12px;color:var(--text-muted);margin-top:6px">' + escHtml(t.description || '') + '</div></div>';
+    }).join('');
+    window.__wfMarketTemplates = d.templates;
+  } catch(e) {
+    const box = document.getElementById('wf-market-list');
+    if (box) box.innerHTML = '<div style="font-size:12.5px;color:#EF4444">加载失败：' + escHtml(e.message) + '</div>';
+  }
+}
+
+async function wfImportBuiltin(idx) {
+  const t = (window.__wfMarketTemplates || [])[idx];
+  if (!t) return;
+  await wfImportPayloads([t]);
+}
+
+async function wfImportFile() {
+  const inp = document.getElementById('wf-import-file');
+  const f = inp && inp.files && inp.files[0];
+  if (!f) { toastError('请先选择 JSON 文件'); return; }
+  try {
+    const text = await f.text();
+    const obj = JSON.parse(text);
+    const payloads = Array.isArray(obj) ? obj : (Array.isArray(obj.templates) ? obj.templates : [obj]);
+    await wfImportPayloads(payloads);
+  } catch(e) { toastError('文件解析失败：' + e.message); }
+}
+
+async function wfImportPayloads(payloads) {
+  try {
+    const res = await fetch('/api/intelligence/workflows/import', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ templates: payloads })
+    });
+    const d = await res.json();
+    if (!d.ok) { toastError(d.msg || (d.results && d.results[0] && d.results[0].error) || '导入失败'); return; }
+    toastSuccess('已导入 ' + d.imported + ' 个模板');
+    loadWorkflows();
+  } catch(e) { toastError('导入失败：' + e.message); }
 }
 
 async function wfRun() {
@@ -7203,6 +7368,12 @@ function wfCloseRunDrawer() {
     <div class="nav-item" onclick="window.open('/monitor-screen', '_blank')" id="nav-monitor-screen" data-page-node-id="scrNavMenu1">
       <span class="icon" data-page-node-id="scrNavMenu2"><svg viewBox="0 0 24 24" aria-hidden="true" data-page-node-id="scrNavMenu3"><rect x="2" y="4" width="20" height="13" rx="2" data-page-node-id="scrNavMenu4"/><path d="M8 21h8M12 17v4" data-page-node-id="scrNavMenu5"/></svg></span> <span data-i18n="webui.nav_monitor_screen">监控大屏</span>
     </div>
+    <div class="nav-item" onclick="showPage('fleet')" id="nav-fleet" data-page-node-id="fLeEt1nav">
+      <span class="icon" data-page-node-id="fLeEt2icon"><svg viewBox="0 0 24 24" aria-hidden="true" data-page-node-id="fLeEt3icon"><circle cx="5" cy="6" r="2.2"/><circle cx="19" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/><path d="M6.6 7.6 10.5 16M17.4 7.6 13.5 16M7.2 6h9.6"/></svg></span> <span data-page-node-id="fLeEt4label">智能基线</span>
+    </div>
+    <div class="nav-item" onclick="showPage('twin')" id="nav-twin" data-page-node-id="tWiN1nav">
+      <span class="icon" data-page-node-id="tWiN2icon"><svg viewBox="0 0 24 24" aria-hidden="true" data-page-node-id="tWiN3icon"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/><path d="M11 7h4a2 2 0 0 1 2 2v4M13 17H9a2 2 0 0 1-2-2v-4"/></svg></span> <span data-page-node-id="tWiN4label">拓扑巡检</span>
+    </div>
     <div class="nav-item" onclick="showPage('sql-editor')" id="nav-sql-editor" data-page-node-id="N1B30jWZmpX0kKvfSud965">
       <span class="icon" data-page-node-id="WB7ROL3LKzu9sulipRzqIc"><svg viewBox="0 0 24 24" aria-hidden="true" data-page-node-id="S8uYKaDi3JnNbYhUH6Xgos"><path d="m16 18 6-6-6-6" data-page-node-id="xcl9gEKKlFmaJlU8By7ej5"/><path d="m8 6-6 6 6 6" data-page-node-id="rzyAKbzdAFplGGNCEnupxb"/></svg></span> <span data-i18n="webui.nav_sql_editor" data-page-node-id="tkBf0jEEQGjTiW7sM7OFlL">SQL 编辑器</span>
     </div>
@@ -8739,7 +8910,7 @@ curl -H "X-API-Key: YOUR_API_KEY" http://localhost:5003/api/v1/inspect/{task_id}
               <span style="font-weight:600" data-page-node-id="xxhSQ11CEVTyBgKOGCeEds">显示 AI 巡检助手（右侧聊天框）</span>
             </label>
             <div style="font-size:11.5px;color:var(--text-muted);margin-top:4px;margin-left:24px" data-page-node-id="p5kT4wxBOYL6DlClzZDgLO">
-              关闭后右侧 AI 巡检助手聊天框默认隐藏，对所有用户生效。
+              默认隐藏，可点右下角 💬 浮动按钮唤出；勾选后页面加载即展开，对所有用户生效。
             </div>
           </div>
 
@@ -10652,11 +10823,12 @@ curl -H "X-API-Key: YOUR_API_KEY" http://localhost:5003/api/v1/inspect/{task_id}
       <!-- ══ Page: Workflow Builder (阶段 D) ══ -->
       <div class="page" id="page-workflow" style="display:none;" data-page-node-id="pdVxXpNfXObDjfn1LplCcj">
         <style>
-          .wf-palette-item{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:10px 6px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);cursor:grab;font-size:12px;font-weight:500;text-align:center;transition:background .15s,transform .1s,border-color .15s;min-height:72px}
-          .wf-palette-item:hover{background:var(--surface);border-color:var(--accent2);transform:translateY(-1px)}
-          .wf-palette-item .pi-ico{width:30px;height:30px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;border-radius:8px;background:linear-gradient(135deg,rgba(56,139,253,.18),rgba(163,113,247,.16));color:var(--accent2)}
-          .wf-palette-item .pi-ico svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-          .wf-palette-item .pi-name{font-weight:500;line-height:1.25;font-size:12px;white-space:normal;word-break:break-word;width:100%}
+          .wf-palette-item{display:flex;align-items:center;gap:8px;padding:5px 7px;border:1px solid transparent;border-radius:8px;background:transparent;cursor:grab;font-size:12px;font-weight:500;transition:background .15s,border-color .15s}
+          .wf-palette-item:hover{background:var(--surface2);border-color:var(--accent2)}
+          .wf-palette-item .pi-ico{width:24px;height:24px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;border-radius:6px;background:linear-gradient(135deg,rgba(56,139,253,.18),rgba(163,113,247,.16));color:var(--accent2)}
+          .wf-palette-item .pi-ico svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+          .wf-palette-item .pi-name{font-weight:500;line-height:1.3;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+          .wf-palette-item .pi-db{flex:0 0 auto;font-size:10px;font-weight:600;color:var(--accent2);background:rgba(56,139,253,.12);border-radius:4px;padding:1px 5px;max-width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
           #wf-canvas{position:relative;width:100%;height:calc(100vh - 210px);min-height:560px;background:var(--surface2);border-radius:10px;overflow:auto;background-image:radial-gradient(var(--border) 1.2px,transparent 1.2px);background-size:22px 22px}
           #wf-edges{position:absolute;left:0;top:0;width:2400px;height:1600px;pointer-events:none;overflow:visible}
           #wf-edges path{pointer-events:stroke;cursor:pointer}
@@ -10671,10 +10843,15 @@ curl -H "X-API-Key: YOUR_API_KEY" http://localhost:5003/api/v1/inspect/{task_id}
           .wf-node .wf-port:hover::after{opacity:1}
           .wf-placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--text-muted);pointer-events:none}
           .wf-palette{max-height:calc(100vh - 240px);overflow-y:auto;padding-right:4px}
-          .wf-palette-group{margin-bottom:14px}
-          .wf-palette-title{display:flex;align-items:center;padding:6px 2px;font-size:12px;font-weight:600;color:var(--text-muted);user-select:none}
-          .wf-palette-title .chevron{display:none}
-          .wf-palette-items{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+          .wf-palette-group{margin-bottom:6px}
+          .wf-palette-title{display:flex;align-items:center;gap:5px;padding:5px 4px;font-size:12px;font-weight:600;color:var(--text-muted);user-select:none;cursor:pointer;border-radius:6px}
+          .wf-palette-title:hover{color:var(--text);background:var(--surface2)}
+          .wf-palette-title .chevron{display:inline-block;font-size:10px;line-height:1;transition:transform .15s}
+          .wf-palette-group[data-open="1"] > .wf-palette-title .chevron{transform:rotate(90deg)}
+          .wf-palette-title .gt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+          .wf-palette-title .gcount{flex:0 0 auto;font-size:10px;font-weight:600;color:var(--text-muted);background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:0 6px;line-height:15px}
+          .wf-palette-group[data-open="0"] > .wf-palette-items{display:none}
+          .wf-palette-items{display:flex;flex-direction:column;gap:2px}
           .wf-palette-search{width:100%;padding:6px 9px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:12px;margin-bottom:10px;outline:none}
           .wf-palette-search:focus{border-color:var(--accent2)}
           .wf-palette-empty{font-size:11.5px;color:var(--text-muted);padding:8px;text-align:center}
@@ -10691,7 +10868,9 @@ curl -H "X-API-Key: YOUR_API_KEY" http://localhost:5003/api/v1/inspect/{task_id}
             <button class="btn btn-primary" onclick="wfNew()" data-page-node-id="EJfY0hCQXnwMSuEKDT8XXg">+ 新增工作流</button>
           </div>
           <div class="card" data-page-node-id="CTw2FjaErMwcgY62RXGDnJ">
-            <div class="card-title" data-page-node-id="Gzyq6V1bLkFW1AdZi0RZlM">已保存工作流 <span class="badge" id="wf-count" data-page-node-id="9Wdby7gKyBAEGBaJPbEtn2">0</span></div>
+            <div class="card-title" data-page-node-id="Gzyq6V1bLkFW1AdZi0RZlM">已保存工作流 <span class="badge" id="wf-count" data-page-node-id="9Wdby7gKyBAEGBaJPbEtn2">0</span>
+              <button class="btn btn-ghost" style="margin-left:auto;font-size:12px;padding:4px 12px" onclick="wfOpenMarket()" data-page-node-id="wfMarketBtn">📦 模板市场</button>
+            </div>
             <div id="wf-list" data-page-node-id="czEyuKVhLRsGohfKrO7XDl"></div>
           </div>
           <div class="card" id="wf-run-card" style="display:none" data-page-node-id="AJRqMPKr6EBWsQY2rJe4lf">
@@ -11085,6 +11264,175 @@ curl -H "X-API-Key: YOUR_API_KEY" http://localhost:5003/api/v1/inspect/{task_id}
         </div>
         <div class="aut-drawer-mask" id="autonomy-drawer-mask" onclick="closeAutonomyDrawer()" data-page-node-id="aUtoNmYmask"></div>
       </div><!-- /page-autonomy -->
+
+      <div class="page" id="page-fleet" style="display:none;" data-page-node-id="fLeEtpage">
+        <style>
+          .fl-stats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+          .fl-st{flex:1;min-width:120px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+          .fl-st .n{font-size:22px;font-weight:800;line-height:1}
+          .fl-st .l{font-size:12px;color:var(--text-muted)}
+          .fl-table{width:100%;border-collapse:collapse;font-size:12.5px}
+          .fl-table th{text-align:left;padding:8px 10px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);white-space:nowrap}
+          .fl-table td{padding:9px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+          .fl-table tr:hover td{background:var(--surface2)}
+          .fl-badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap}
+          .fl-bar{height:6px;border-radius:4px;background:var(--border);overflow:hidden;min-width:70px}
+          .fl-bar>i{display:block;height:100%;border-radius:4px}
+          .fl-drawer{position:fixed;top:0;right:0;height:100%;width:min(600px,94vw);background:var(--surface);border-left:1px solid var(--border);box-shadow:-8px 0 28px rgba(0,0,0,.32);transform:translateX(100%);transition:transform .22s ease,right .22s ease;z-index:10002;display:flex;flex-direction:column}
+          .fl-drawer-mask{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:10001;display:none}
+          @media (max-width:900px){.fl-drawer{width:auto}}
+          .fl-drawer.open{transform:translateX(0)}
+          .fl-drawer .fd-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--border)}
+          .fl-drawer .fd-body{padding:16px 18px;overflow-y:auto;flex:1}
+          .fl-sec{margin-bottom:18px}
+          .fl-sec h4{font-size:13px;margin:0 0 8px;color:var(--accent2);display:flex;align-items:center;gap:6px}
+          .fl-item{background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:10px 12px;margin-bottom:8px;font-size:12.5px}
+        </style>
+
+        <!-- Hero：说明 + 基线学习 -->
+        <div class="card intel-hero" data-page-node-id="fLeEthero">
+          <div class="card-title" data-page-node-id="fLeEttitle">
+            <svg viewBox="0 0 24 24" width="18" height="18" style="stroke:var(--accent2);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round" data-page-node-id="fLeEticon"><circle cx="5" cy="6" r="2.2"/><circle cx="19" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/><path d="M6.6 7.6 10.5 16M17.4 7.6 13.5 16M7.2 6h9.6"/></svg>
+            <span data-page-node-id="fLeEttitletext">智能基线 · Smart Baseline</span>
+          </div>
+          <div style="color:var(--text-muted);font-size:12.5px;margin-bottom:14px" data-page-node-id="fLeEtsub">
+            对全部纳管实例（含国产库）做<b>无监督基线学习</b>：按「小时」学习各指标一天内不同时段的正常波动区间，自动发现<b>偏离基线的漂移</b>与<b>容量触顶风险</b>——从单点巡检升级为全库级智能。
+          </div>
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap" data-page-node-id="fLeEtctrl">
+            <select id="fl-learn-days" class="form-input" style="width:150px" data-page-node-id="fLeEtdays">
+              <option value="7">学习近 7 天</option>
+              <option value="14" selected>学习近 14 天</option>
+              <option value="30">学习近 30 天</option>
+            </select>
+            <button class="btn btn-primary" onclick="fleetLearnAll(this)" data-page-node-id="fLeEtlearnbtn">🧠 学习全部基线</button>
+            <button class="btn btn-ghost" onclick="loadFleetOverview()" data-page-node-id="fLeEtrefresh">↻ 刷新总览</button>
+          </div>
+        </div>
+
+        <!-- 统计卡 -->
+        <div class="fl-stats" id="fleet-stats" data-page-node-id="fLeEtstats"></div>
+
+        <!-- 实例排行 -->
+        <div class="card" data-page-node-id="fLeEttablecard">
+          <div class="card-title" data-page-node-id="fLeEttabletitle">实例排行
+            <span style="margin-left:auto;font-size:11px;color:var(--text-muted);font-weight:400" data-page-node-id="fLeEttablehint">按 容量风险 → 漂移严重度 排序 · 基线=小时桶</span>
+          </div>
+          <div style="overflow-x:auto" data-page-node-id="fLeEttablewrap">
+            <table class="fl-table" id="fleet-table" data-page-node-id="fLeEttable">
+              <thead><tr data-page-node-id="fLeEtthead">
+                <th data-page-node-id="fLeEtth1">实例</th><th data-page-node-id="fLeEtth2">类型</th><th data-page-node-id="fLeEtth3">样本</th>
+                <th data-page-node-id="fLeEtth4">基线</th><th data-page-node-id="fLeEtth5">漂移</th><th data-page-node-id="fLeEtth6">容量风险</th><th data-page-node-id="fLeEtth7">操作</th>
+              </tr></thead>
+              <tbody id="fleet-tbody" data-page-node-id="fLeEttbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 下钻抽屉 -->
+        <div class="fl-drawer" id="fleet-drawer" data-page-node-id="fLeEtdrawer">
+          <div class="fd-head" data-page-node-id="fLeEtdhead">
+            <div data-page-node-id="fLeEtdtitle"><b id="fd-title">实例详情</b></div>
+            <button class="btn btn-ghost" style="padding:4px 10px" onclick="closeFleetDrawer()" data-page-node-id="fLeEtdclose">✕</button>
+          </div>
+          <div class="fd-body" id="fd-body" data-page-node-id="fLeEtdbody"></div>
+        </div>
+        <div class="fl-drawer-mask" id="fleet-drawer-mask" onclick="closeFleetDrawer()" data-page-node-id="fLeEtmask"></div>
+      </div><!-- /page-fleet -->
+
+      <!-- ══ Page: 拓扑巡检（P2 DB Twin）══ -->
+      <div class="page" id="page-twin" style="display:none;" data-page-node-id="tWiNpage">
+        <style>
+          .tw-summary{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+          .tw-st{flex:1;min-width:100px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 14px;display:flex;flex-direction:column;gap:3px}
+          .tw-st .n{font-size:20px;font-weight:800;line-height:1}
+          .tw-st .l{font-size:11.5px;color:var(--text-muted)}
+          .tw-canvas-wrap{overflow:auto;border:1px solid var(--border);border-radius:10px;background:var(--surface2);background-image:radial-gradient(var(--border) 1px,transparent 1px);background-size:20px 20px}
+          .tw-node{cursor:pointer}
+          .tw-node:hover .tw-box{filter:brightness(1.15)}
+          .tw-replay{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+          .tw-replay input[type=range]{flex:1;min-width:180px;accent-color:var(--accent2)}
+          .tw-modal-mask{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10005;display:none;align-items:center;justify-content:center}
+          .tw-modal-mask.open{display:flex}
+          .tw-modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;width:min(560px,94vw);max-height:86vh;overflow-y:auto}
+          .tw-form-row{display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+          .tw-form-row>div{flex:1;min-width:140px}
+          .tw-form-row label{display:block;font-size:12px;color:var(--text-muted);margin-bottom:4px}
+          .tw-link-row{display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:7px 10px;margin-bottom:6px;font-size:12.5px}
+        </style>
+
+        <!-- Hero -->
+        <div class="card intel-hero" data-page-node-id="tWiNhero">
+          <div class="card-title" data-page-node-id="tWiNtitle">
+            <svg viewBox="0 0 24 24" width="18" height="18" style="stroke:var(--accent2);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round" data-page-node-id="tWiNicon"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/><path d="M11 7h4a2 2 0 0 1 2 2v4M13 17H9a2 2 0 0 1-2-2v-4"/></svg>
+            <span data-page-node-id="tWiNtitletext">拓扑巡检 · Topology Inspection</span>
+          </div>
+          <div style="color:var(--text-muted);font-size:12.5px;margin-bottom:14px" data-page-node-id="tWiNsub">
+            全部纳管数据库的<b>活的数字镜像</b>：实时状态 + 关键指标叠加智能基线结论（漂移 / 容量预测 / 复合健康分），自动识别 Oracle ADG 主备与 RAC 集群关系，支持手动声明跨库型依赖连线与 <b>24 小时历史回放</b>。
+          </div>
+          <div class="tw-replay" data-page-node-id="tWiNctrl">
+            <button class="btn btn-primary" onclick="loadTwinTopology()" data-page-node-id="tWiNrefresh">↻ 刷新实时</button>
+            <button class="btn btn-ghost" onclick="openTwinLinksModal()" data-page-node-id="tWiNlinksbtn">🔗 依赖连线管理</button>
+            <span style="font-size:12px;color:var(--text-muted)" data-page-node-id="tWiNreplaylabel">回放</span>
+            <input type="range" id="tw-replay-slider" min="0" max="24" step="1" value="0" oninput="twinReplayHint(this.value)" onchange="twinOnReplay(this.value)" data-page-node-id="tWiNslider">
+            <span id="tw-replay-val" style="font-size:12px;font-weight:600;color:var(--accent2);min-width:64px" data-page-node-id="tWiNreplayval">实时</span>
+          </div>
+        </div>
+
+        <!-- 汇总 -->
+        <div class="tw-summary" id="twin-summary" data-page-node-id="tWiNsummary"></div>
+
+        <!-- 画布 -->
+        <div class="card" data-page-node-id="tWiNcanvascard">
+          <div class="card-title" data-page-node-id="tWiNcanvastitle">拓扑全景
+            <span style="margin-left:auto;font-size:11px;color:var(--text-muted);font-weight:400" data-page-node-id="tWiNcanvashint">
+              节点颜色=健康分档 · 点击下钻 · 虚线=自动识别(ADG/RAC) · 实线=手动声明
+            </span>
+          </div>
+          <div class="tw-canvas-wrap" data-page-node-id="tWiNcanvaswrap">
+            <svg id="twin-svg" xmlns="http://www.w3.org/2000/svg" data-page-node-id="tWiNsvg"></svg>
+          </div>
+          <div id="twin-replay-note" style="display:none;font-size:12px;color:var(--warn);margin-top:8px" data-page-node-id="tWiNreplaynote"></div>
+        </div>
+
+        <!-- 下钻抽屉（复用基线页抽屉样式）-->
+        <div class="fl-drawer" id="twin-drawer" data-page-node-id="tWiNdrawer">
+          <div class="fd-head" data-page-node-id="tWiNdhead">
+            <div data-page-node-id="tWiNdtitle"><b id="twd-title">节点详情</b></div>
+            <button class="btn btn-ghost" style="padding:4px 10px" onclick="closeTwinDrawer()" data-page-node-id="tWiNdclose">✕</button>
+          </div>
+          <div class="fd-body" id="twd-body" data-page-node-id="tWiNdbody"></div>
+        </div>
+        <div class="fl-drawer-mask" id="twin-drawer-mask" onclick="closeTwinDrawer()" data-page-node-id="tWiNmask"></div>
+
+        <!-- 连线管理模态 -->
+        <div class="tw-modal-mask" id="tw-links-mask" onclick="if(event.target===this)closeTwinLinksModal()" data-page-node-id="tWiNmodalmask">
+          <div class="tw-modal" data-page-node-id="tWiNmodal">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px" data-page-node-id="tWiNmodalhead">
+              <b style="font-size:15px" data-page-node-id="tWiNmodaltitle">🔗 依赖连线管理</b>
+              <button class="btn btn-ghost" style="padding:4px 10px" onclick="closeTwinLinksModal()" data-page-node-id="tWiNmodalclose">✕</button>
+            </div>
+            <div class="tw-form-row" data-page-node-id="tWiNform1">
+              <div><label data-page-node-id="tWiNl1">源实例（发起方）</label><select id="tw-link-src" class="form-input"></select></div>
+              <div><label data-page-node-id="tWiNl2">目标实例（对端）</label><select id="tw-link-dst" class="form-input"></select></div>
+            </div>
+            <div class="tw-form-row" data-page-node-id="tWiNform2">
+              <div><label data-page-node-id="tWiNl3">连线语义</label>
+                <select id="tw-link-kind" class="form-input" data-page-node-id="tWiNl3sel">
+                  <option value="replica">主从复制</option>
+                  <option value="cluster">集群成员</option>
+                  <option value="standby">容灾 standby</option>
+                  <option value="app">应用依赖</option>
+                  <option value="custom" selected>自定义</option>
+                </select>
+              </div>
+              <div><label data-page-node-id="tWiNl4">备注（可选）</label><input id="tw-link-label" class="form-input" placeholder="如：机房 A → 机房 B 异步复制" data-page-node-id="tWiNl4in"></div>
+            </div>
+            <button class="btn btn-primary" style="margin-bottom:14px" onclick="twinAddLink()" data-page-node-id="tWiNaddbtn">+ 添加连线</button>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px" data-page-node-id="tWiNlisthint">已声明连线</div>
+            <div id="tw-links-list" data-page-node-id="tWiNlist"></div>
+          </div>
+        </div>
+      </div><!-- /page-twin -->
 
       {% if pro_available %}
             <div class="page" id="page-flow" style="display:none;padding:0;" data-page-node-id="V78O7ZrLpeEFP4pwaQIXz4">
@@ -11742,6 +12090,7 @@ function showPage(name) {
     'flow': [i18n('webui.flow_title') || '巡检编排', i18n('webui.flow_desc') || ''],
     'sql-audit': ['SQL 审核', '提交 SQL 变更前的安全审计：解析、规则校验、风险评分（MVP1 仅只读分析，不执行）'],
     'autonomy': ['安全自治 DBA 闭环', '检测→诊断→提议→审批闸门→执行→复检 的可审计自治闭环（P0-c 看板）'],
+    'fleet': ['智能基线 · Smart Baseline', '无监督基线学习 + 漂移检测 + 容量预测：从单点巡检到全库智能（P1）'],
   };
   const t = titles[name] || [name, ''];
   document.getElementById('topbar-title').textContent = t[0];
@@ -11791,6 +12140,8 @@ function showPage(name) {
   if (name === 'diag-history') loadDiagHistoryPage();
   if (name === 'sql-audit') loadSqlAudit();
   if (name === 'autonomy') loadAutonomyPage();
+  if (name === 'fleet') loadFleetOverview();
+  if (name === 'twin') loadTwinTopology();
 
   if (name === 'sql-editor') {
     loadSqlTree();
@@ -15152,6 +15503,489 @@ async function toggleAutonomyKill(on) {
     else toastSuccess(on ? '已开启安全自治' : '已熔断：新建自治闭环被拒绝');
   } catch (e) { toastError('设置失败: ' + e.message); const sw = document.getElementById('aut-kill'); if (sw) sw.checked = !on; }
 }
+
+// ─── 智能基线 Smart Baseline（P1）────────────────────────────────
+let _fleetOverview = null;
+
+async function loadFleetOverview() {
+  const tbody = document.getElementById('fleet-tbody');
+  const statsEl = document.getElementById('fleet-stats');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:24px">加载中…</td></tr>';
+  try {
+    const r = await fetch('/api/intelligence/fleet/overview');
+    const d = await r.json();
+    if (!r.ok || !d.ok) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:24px">' + escapeHtml(d.msg || '加载失败') + '</td></tr>'; return; }
+    _fleetOverview = d;
+    const insts = d.instances || [];
+    const driftInsts = insts.filter(x => x.drift_critical + x.drift_warning > 0).length;
+    const capInsts = insts.filter(x => (x.capacity_risks || []).length > 0).length;
+    statsEl.innerHTML =
+      '<div class="fl-st"><span class="n">' + d.total + '</span><span class="l">监控实例</span></div>' +
+      '<div class="fl-st"><span class="n" style="color:var(--accent2)">' + d.with_baseline + '</span><span class="l">已学基线</span></div>' +
+      '<div class="fl-st"><span class="n" style="color:' + (driftInsts ? '#ef4444' : 'var(--text)') + '">' + driftInsts + '</span><span class="l">漂移实例</span></div>' +
+      '<div class="fl-st"><span class="n" style="color:' + (capInsts ? '#f59e0b' : 'var(--text)') + '">' + capInsts + '</span><span class="l">容量风险</span></div>';
+    if (!insts.length) {
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:24px">监控历史库暂无数据——大屏采集运行后回来看</td></tr>';
+      return;
+    }
+    tbody.innerHTML = insts.map(x => {
+      const blBadge = x.has_baseline
+        ? '<span class="fl-badge" style="background:#22c55e22;color:#22c55e">✔ ' + x.baseline_buckets + ' 桶</span>'        : '<span class="fl-badge" style="background:var(--border);color:var(--text-muted)">未学习</span>';
+      let driftHtml = '<span style="color:var(--text-muted)">—</span>';
+      if (x.drift_critical + x.drift_warning > 0) {
+        driftHtml = (x.drift_critical ? '<span class="fl-badge" style="background:#ef444422;color:#ef4444;margin-right:4px">' + x.drift_critical + ' 严重</span>' : '') +
+                    (x.drift_warning ? '<span class="fl-badge" style="background:#f59e0b22;color:#f59e0b">' + x.drift_warning + ' 警告</span>' : '');
+      }
+      let capHtml = '<span style="color:var(--text-muted)">—</span>';
+      if ((x.capacity_risks || []).length) {
+        capHtml = x.capacity_risks.map(f =>
+          '<span class="fl-badge" style="background:' + (f.severity === 'critical' ? '#ef444422;color:#ef4444' : '#f59e0b22;color:#f59e0b') + ';margin-right:4px" title="' + escapeHtml(f.label + ' 预计 ' + f.eta + ' 触及 ' + f.threshold) + '">' +
+          escapeHtml(f.label) + ' ' + escapeHtml(f.eta) + '</span>').join('');
+      }
+      const driftColor = x.drift_critical ? '#ef4444' : (x.drift_warning ? '#f59e0b' : '#22c55e');
+      return '<tr>' +
+        '<td style="font-weight:600">' + escapeHtml(x.name) + (x.name !== x.iid ? ' <span style="font-size:10px;color:var(--text-muted)">' + escapeHtml(String(x.iid).slice(0, 8)) + '</span>' : '') + '</td>' +
+        '<td>' + escapeHtml(x.db_type || '—') + '</td>' +
+        '<td>' + x.n_samples + '</td>' +
+        '<td>' + blBadge + '</td>' +
+        '<td style="color:' + driftColor + '">' + driftHtml + '</td>' +
+        '<td>' + capHtml + '</td>' +
+        '<td style="white-space:nowrap">' +
+          '<button class="btn btn-ghost" style="padding:3px 10px;font-size:11.5px" onclick="openFleetDrawer(\'' + x.iid + '\')">🔍 下钻</button> ' +
+          '<button class="btn btn-ghost" style="padding:3px 10px;font-size:11.5px" onclick="fleetLearnOne(\'' + x.iid + '\', this)" title="学习该实例基线">🧠 学习</button>' +
+        '</td></tr>';
+    }).join('');
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:24px">加载失败: ' + escapeHtml(e.message) + '</td></tr>';
+  }
+}
+
+async function fleetLearnAll(btn) {
+  const days = parseInt((document.getElementById('fl-learn-days') || {}).value || '14', 10);
+  if (btn) { btn.disabled = true; btn.textContent = '🧠 学习中…'; }
+  try {
+    const r = await fetch('/api/intelligence/fleet/learn', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ days: days })
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) { toastError('学习失败: ' + (d.msg || res.status)); }
+    else {
+      const fail = (d.results || []).filter(x => !x.ok);
+      if (fail.length) toastError(d.learned + '/' + d.total + ' 成功；' + fail.length + ' 个实例' + escapeHtml(fail[0].detail || '样本不足'));
+      else toastSuccess('已为 ' + d.learned + ' 个实例学习基线');
+    }
+    await loadFleetOverview();
+  } catch (e) { toastError('学习失败: ' + e.message); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '🧠 学习全部基线'; } }
+}
+
+async function fleetLearnOne(iid, btn) {
+  const days = parseInt((document.getElementById('fl-learn-days') || {}).value || '14', 10);
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    const r = await fetch('/api/intelligence/fleet/learn', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ iid: iid, days: days })
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) { toastError('学习失败: ' + (d.msg || (d.results && d.results[0] && d.results[0].detail) || res.status)); }
+    else toastSuccess('基线已学习（' + days + ' 天）');
+    await loadFleetOverview();
+  } catch (e) { toastError('学习失败: ' + e.message); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = '🧠 学习'; } }
+}
+
+async function openFleetDrawer(iid) {
+  const drawer = document.getElementById('fleet-drawer');
+  const mask = document.getElementById('fleet-drawer-mask');
+  const body = document.getElementById('fd-body');
+  const inst = ((_fleetOverview || {}).instances || []).find(x => x.iid === iid) || {};
+  document.getElementById('fd-title').textContent = (inst.name || iid) + ' · 基线下钻';
+  drawer.classList.add('open'); mask.classList.add('open');
+  body.innerHTML = '<div class="aut-empty">加载中…</div>';
+
+  let html = '';
+  // ① 基线状态
+  html += '<div class="fl-sec"><h4>① 基线状态</h4><div class="fl-item">' +
+    (inst.has_baseline
+      ? '✔ 已学习 <b>' + inst.baseline_buckets + '</b> 个小时桶，最近学习 ' + escapeHtml(inst.learned_at || '—') + '，样本 ' + inst.n_samples + ' 条'
+      : '⚠ 尚未学习基线——漂移/容量检测不可用，请先点击「🧠 学习」') +
+    '</div></div>';
+
+  // ② 漂移检测
+  html += '<div class="fl-sec"><h4>② 漂移检测（最近 30 分钟 vs 时段基线）</h4><div id="fd-drifts"><div style="color:var(--text-muted);font-size:12px">检测中…</div></div></div>';
+
+  // ③ 容量预测
+  html += '<div class="fl-sec"><h4>③ 容量预测（14 天线性外推）</h4><div id="fd-forecast"><div style="color:var(--text-muted);font-size:12px">计算中…</div></div></div>';
+
+  // ④ 联动自治闭环
+  html += '<div class="fl-sec"><h4>④ 联动处置</h4><div class="fl-item">以漂移/容量事件为种子触发<b>安全自治闭环</b>（诊断 → 写类提案 → 人工审批闸门）。</div>' +
+    '<button class="btn btn-primary" style="padding:7px 16px" onclick="fleetTriggerAutonomy(\'' + iid + '\')">⚡ 触发自治闭环</button></div>';
+
+  body.innerHTML = html;
+
+  // 并行拉漂移 + 容量
+  const [dr, fc] = await Promise.all([
+    fetch('/api/intelligence/fleet/drift/' + encodeURIComponent(iid)).then(r => r.json()).catch(() => null),
+    fetch('/api/intelligence/fleet/forecast/' + encodeURIComponent(iid)).then(r => r.json()).catch(() => null)
+  ]);
+
+  const driftEl = document.getElementById('fd-drifts');
+  if (driftEl) {
+    if (!dr || !dr.ok) {
+      driftEl.innerHTML = '<div class="fl-item" style="color:var(--text-muted)">' + escapeHtml((dr && dr.detail) || '暂无漂移数据') + '</div>';
+    } else if (!(dr.drifts || []).length) {
+      driftEl.innerHTML = '<div class="fl-item" style="color:#22c55e">✔ 各指标均在该时段正常区间内，无漂移</div>';
+    } else {
+      driftEl.innerHTML = dr.drifts.map(d => {
+        const color = d.severity === 'critical' ? '#ef4444' : '#f59e0b';
+        const pctBar = d.p95 > d.p50 ? Math.min(100, Math.max(0, (d.value - d.p50) / (d.p95 - d.p50) * 50)) : 50;
+        return '<div class="fl-item"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px">' +
+          '<b>' + escapeHtml(d.label) + '</b>' +
+          '<span class="fl-badge" style="background:' + color + '22;color:' + color + '">' + (d.severity === 'critical' ? '严重漂移' : '警告漂移') + ' z=' + d.z + '</span></div>' +
+          '<div style="margin:6px 0 4px">当前 <b>' + d.value + '</b> · 基线 P50=' + d.p50 + ' / P95=' + d.p95 + '</div>' +
+          '<div class="fl-bar"><i style="width:' + pctBar + '%;background:' + color + '"></i></div></div>';
+      }).join('');
+    }
+  }
+
+  const fcEl = document.getElementById('fd-forecast');
+  if (fcEl) {
+    if (!fc || !fc.ok) {
+      fcEl.innerHTML = '<div class="fl-item" style="color:var(--text-muted)">' + escapeHtml((fc && fc.detail) || '暂无预测数据') + '</div>';
+    } else if (!(fc.forecasts || []).length) {
+      fcEl.innerHTML = '<div class="fl-item" style="color:var(--text-muted)">无趋势型指标可预测</div>';
+    } else {
+      fcEl.innerHTML = fc.forecasts.map(f => {
+        const risky = !!f.eta;
+        const color = f.severity === 'critical' ? '#ef4444' : '#f59e0b';
+        const pct = Math.min(100, Math.max(0, f.current / f.threshold * 100));
+        return '<div class="fl-item"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px">' +
+          '<b>' + escapeHtml(f.label) + '</b>' +
+          (risky ? '<span class="fl-badge" style="background:' + color + '22;color:' + color + '">预计 ' + escapeHtml(f.eta) + ' 触及 ' + f.threshold + '</span>' : '<span class="fl-badge" style="background:#22c55e22;color:#22c55e">预测窗口内安全</span>') +
+          '</div><div style="margin:6px 0 4px">当前 <b>' + f.current + '</b> / 阈值 ' + f.threshold + ' · 日均变化 ' + f.slope_per_day + (f.days_to_threshold != null ? ' · 约 ' + f.days_to_threshold + ' 天后触顶' : '') + '</div>' +
+          '<div class="fl-bar"><i style="width:' + pct + '%;background:' + (risky ? color : '#22c55e') + '"></i></div></div>';
+      }).join('');
+    }
+  }
+}
+
+function closeFleetDrawer() {
+  const drawer = document.getElementById('fleet-drawer');
+  const mask = document.getElementById('fleet-drawer-mask');
+  if (drawer) drawer.classList.remove('open');
+  if (mask) mask.classList.remove('open');
+}
+
+async function fleetTriggerAutonomy(iid) {
+  try {
+    const res = await fetch('/api/intelligence/autonomy/run', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instance_id: iid, submitter: 'fleet-bot' })
+    });
+    const d = await res.json();
+    if (!res.ok || !d.ok) { toastError('触发失败: ' + (d.msg || res.status)); return; }
+    toastSuccess('自治闭环 #' + d.run_id + ' 已创建（状态 ' + d.state + '），请到「安全自治」页查看');
+    closeFleetDrawer();
+  } catch (e) { toastError('触发失败: ' + e.message); }
+}
+
+// ─── P2 拓扑巡检（DB Twin） ─────────────────────────────────────────────
+let _twinData = null;
+let _twinMode = 'live';
+const TW_GRADE_COLOR = { healthy: '#22c55e', degraded: '#f59e0b', at_risk: '#f97316', critical: '#ef4444', unknown: '#8b949e' };
+const TW_GRADE_LABEL = { healthy: '健康', degraded: '亚健康', at_risk: '风险', critical: '危急', unknown: '无数据' };
+const TW_STATUS_COLOR = { ok: '#22c55e', warn: '#f59e0b', crit: '#ef4444', down: '#ef4444', pending: '#8b949e', unsupported: '#8b949e', unknown: '#8b949e' };
+const TW_KIND_LABEL = { adg: 'Redo 传输', rac: 'RAC 集群', replica: '主从复制', cluster: '集群成员', standby: '容灾 standby', app: '应用依赖', custom: '自定义' };
+
+function twFm(v) { return (v === null || v === undefined || v === '') ? '—' : v; }
+
+async function loadTwinTopology() {
+  try {
+    const r = await fetch('/api/intelligence/twin/topology');
+    const d = await r.json();
+    if (!r.ok || !d.ok) { toastError(d.msg || '拓扑加载失败'); return; }
+    _twinData = d; _twinMode = 'live';
+    const slider = document.getElementById('tw-replay-slider');
+    if (slider) slider.value = 0;
+    twinReplayHint(0);
+    const note = document.getElementById('twin-replay-note');
+    if (note) note.style.display = 'none';
+    twinRenderAll();
+  } catch (e) { toastError('拓扑加载失败: ' + e.message); }
+}
+
+function twinReplayHint(v) {
+  const el = document.getElementById('tw-replay-val');
+  if (el) el.textContent = (+v === 0) ? '实时' : v + ' 小时前';
+}
+
+async function twinOnReplay(v) {
+  const hours = +v;
+  if (!hours) { loadTwinTopology(); return; }
+  try {
+    const r = await fetch('/api/intelligence/twin/replay?hours_ago=' + hours);
+    const d = await r.json();
+    if (!r.ok || !d.ok) { toastError(d.msg || '回放失败'); return; }
+    _twinData = d; _twinMode = 'replay';
+    const note = document.getElementById('twin-replay-note');
+    if (note) {
+      note.style.display = '';
+      note.innerHTML = '🕐 <b>回放视图</b>：显示 ' + hours + ' 小时前（' + new Date(d.at_ts * 1000).toLocaleString() + '）的拓扑状态；漂移/容量等智能叠加仅在实时视图有效。' +
+        '<button class="btn btn-ghost" style="padding:2px 10px;font-size:11.5px;margin-left:8px" onclick="loadTwinTopology()">回到实时</button>';
+    }
+    twinRenderAll();
+  } catch (e) { toastError('回放失败: ' + e.message); }
+}
+
+function twinRenderAll() {
+  const d = _twinData;
+  if (!d) return;
+  // 汇总卡
+  const s = d.summary || {};
+  const el = document.getElementById('twin-summary');
+  if (el) {
+    const cnt = (g) => s[g] || 0;
+    el.innerHTML =
+      '<div class="tw-st"><span class="n">' + (s.total || 0) + '</span><span class="l">节点</span></div>' +
+      '<div class="tw-st"><span class="n" style="color:#22c55e">' + cnt('healthy') + '</span><span class="l">健康</span></div>' +
+      '<div class="tw-st"><span class="n" style="color:#f59e0b">' + cnt('degraded') + '</span><span class="l">亚健康</span></div>' +
+      '<div class="tw-st"><span class="n" style="color:#f97316">' + cnt('at_risk') + '</span><span class="l">风险</span></div>' +
+      '<div class="tw-st"><span class="n" style="color:#ef4444">' + (cnt('critical') + cnt('down')) + '</span><span class="l">危急/宕机</span></div>' +
+      '<div class="tw-st"><span class="n" style="color:var(--accent2)">' + (s.edges || 0) + '</span><span class="l">连线（自动 ' + (s.auto_edges || 0) + ' / 手动 ' + (s.manual_edges || 0) + '）</span></div>' +
+      '<div class="tw-st"><span class="n" style="font-size:13px;padding-top:4px">' + (d.source === 'screen' ? '大屏富快照' : '历史库回退') + '</span><span class="l">数据源</span></div>';
+  }
+  twinRenderCanvas(d);
+}
+
+function twinLayout(nodes) {
+  const groups = {};
+  nodes.forEach(n => { const g = n.group || '默认'; (groups[g] = groups[g] || []).push(n); });
+  const names = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+  const W = 184, H = 78, COLW = W + 66, ROWH = H + 24, TOP = 64, LEFT = 56;
+  let maxRows = 1;
+  names.forEach(g => { maxRows = Math.max(maxRows, groups[g].length); });
+  const width = Math.max(920, LEFT + names.length * COLW + 30);
+  const height = Math.max(400, TOP + maxRows * ROWH + 40);
+  const pos = {};
+  names.forEach((g, gi) => {
+    groups[g].forEach((n, ni) => { pos[n.iid] = { x: LEFT + gi * COLW, y: TOP + ni * ROWH, w: W, h: H }; });
+  });
+  return { pos: pos, width: width, height: height, names: names };
+}
+
+function twEdgePath(a, b) {
+  const ax = a.x + a.w, ay = a.y + a.h / 2, bx = b.x, by = b.y + b.h / 2;
+  if (bx >= ax + 12) {
+    const mx = (ax + bx) / 2;
+    return 'M' + ax + ' ' + ay + ' C ' + mx + ' ' + ay + ', ' + mx + ' ' + by + ', ' + bx + ' ' + by;
+  }
+  const tx = a.x + a.w / 2, ty = a.y, bx2 = b.x + b.w / 2, by2 = b.y;
+  return 'M' + tx + ' ' + ty + ' C ' + tx + ' ' + (ty - 48) + ', ' + bx2 + ' ' + (by2 - 48) + ', ' + bx2 + ' ' + by2;
+}
+
+function twinRenderCanvas(d) {
+  const svg = document.getElementById('twin-svg');
+  if (!svg) return;
+  const nodes = d.nodes || [];
+  if (!nodes.length) {
+    svg.setAttribute('width', '100%'); svg.setAttribute('height', '300');
+    svg.innerHTML = '<text x="50%" y="150" text-anchor="middle" fill="var(--text-muted)" font-size="13">暂无节点——大屏采集运行后自动出现</text>';
+    return;
+  }
+  const L = twinLayout(nodes);
+  const edges = d.edges || [];
+  // 连线颜色：adg 蓝 / rac 灰 / 手动 teal / 悬空红
+  const eColor = (e) => e.dangling ? '#ef4444' : (e.auto ? (e.kind === 'adg' ? '#378ADD' : '#8b949e') : '#0f9e8e');
+  const eDash = (e) => (e.auto || e.dangling) ? '6 4' : '';
+  const markerIds = {};
+  edges.forEach(e => { const c = eColor(e); if (!markerIds[c]) markerIds[c] = 'tw-arr-' + c.replace('#', ''); });
+
+  let defs = '<defs>';
+  Object.keys(markerIds).forEach(c => {
+    const col = '#' + c.replace('#', '');
+    defs += '<marker id="' + markerIds[c] + '" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="' + col + '"/></marker>';
+  });
+  defs += '</defs>';
+
+  // 列头（环境分组）
+  let headers = '';
+  L.names.forEach(g => {
+    const first = nodes.find(n => (n.group || '默认') === g);
+    if (!first) return;
+    const p = L.pos[first.iid];
+    headers += '<text x="' + (p.x + p.w / 2) + '" y="34" text-anchor="middle" font-size="12.5" font-weight="600" fill="var(--text-muted)">' + escapeHtml(g) + '</text>';
+  });
+
+  // 连线（先画，节点压在上层）
+  let edgeHtml = '';
+  edges.forEach(e => {
+    const a = L.pos[e.src], b = L.pos[e.dst];
+    if (!a || !b) return;
+    const col = eColor(e);
+    const mid = e.label || TW_KIND_LABEL[e.kind] || e.kind;
+    edgeHtml += '<path d="' + twEdgePath(a, b) + '" fill="none" stroke="' + col + '" stroke-width="1.6"' +
+      (eDash(e) ? ' stroke-dasharray="' + eDash(e) + '"' : '') +
+      ' marker-end="url(#' + markerIds[col] + ')" opacity="' + (e.dangling ? 0.5 : 0.85) + '">' +
+      '<title>' + escapeHtml(mid + (e.dangling ? '（对端不在当前快照）' : '')) + '</title></path>';
+  });
+
+  // 节点
+  const trunc = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
+  let nodeHtml = '';
+  nodes.forEach(n => {
+    const p = L.pos[n.iid];
+    if (!p) return;
+    const gc = TW_GRADE_COLOR[n.grade] || TW_GRADE_COLOR.unknown;
+    const sc = TW_STATUS_COLOR[n.status] || TW_STATUS_COLOR.unknown;
+    const score = (n.score === null || n.score === undefined) ? '–' : n.score;
+    const driftN = (n.drift_critical || 0) + (n.drift_warning || 0);
+    const capN = (n.capacity_risks || []).length;
+    let extras = '';
+    if (driftN) extras += '<text x="' + (p.x + p.w - 40) + '" y="' + (p.y + p.h - 8) + '" text-anchor="end" font-size="10" fill="' + ((n.drift_critical || 0) ? '#ef4444' : '#f59e0b') + '">▲ 漂移 ' + driftN + '</text>';
+    if (capN) extras += '<text x="' + (p.x + 12) + '" y="' + (p.y + p.h - 8) + '" font-size="10" fill="#f97316">◆ 容量 ' + capN + '</text>';
+    const roleTxt = n.role ? (' · ' + trunc(String(n.role), 14)) : '';
+    nodeHtml += '<g class="tw-node" onclick="openTwinDrawer(\'' + n.iid + '\')">' +
+      '<rect class="tw-box" x="' + p.x + '" y="' + p.y + '" width="' + p.w + '" height="' + p.h + '" rx="10" fill="var(--surface)" stroke="' + gc + '" stroke-width="' + (n.status === 'down' ? '2.6' : '1.8') + '"' + (n.status === 'down' ? ' stroke-dasharray="5 3"' : '') + '/>' +
+      '<circle cx="' + (p.x + 13) + '" cy="' + (p.y + 16) + '" r="5" fill="' + sc + '"><title>' + escapeHtml(n.status) + '</title></circle>' +
+      '<text x="' + (p.x + 24) + '" y="' + (p.y + 20) + '" font-size="12.5" font-weight="600" fill="var(--text)">' + escapeHtml(trunc(n.name, 13)) + '</text>' +
+      '<text x="' + (p.x + 12) + '" y="' + (p.y + 40) + '" font-size="10.5" fill="var(--text-muted)">' + escapeHtml(String(n.db_type || '—') + roleTxt) + '</text>' +
+      '<circle cx="' + (p.x + p.w - 20) + '" cy="' + (p.y + 19) + '" r="14" fill="' + gc + '" opacity="0.16"/>' +
+      '<text x="' + (p.x + p.w - 20) + '" y="' + (p.y + 23) + '" text-anchor="middle" font-size="10.5" font-weight="700" fill="' + gc + '">' + score + '</text>' +
+      extras +
+      '<title>' + escapeHtml(n.name + (n.host ? '（' + n.host + ':' + n.port + '）' : '') + ' · ' + n.db_type + ' · 状态 ' + n.status + ' · 健康分 ' + (n.score === null ? '无数据' : n.score) + '（' + TW_GRADE_LABEL[n.grade] + '）') + '</title>' +
+      '</g>';
+  });
+
+  svg.setAttribute('width', L.width);
+  svg.setAttribute('height', L.height);
+  svg.innerHTML = defs + headers + edgeHtml + nodeHtml;
+}
+
+function openTwinDrawer(iid) {
+  const d = _twinData;
+  if (!d) return;
+  const n = (d.nodes || []).find(x => x.iid === iid);
+  if (!n) return;
+  const drawer = document.getElementById('twin-drawer');
+  const mask = document.getElementById('twin-drawer-mask');
+  document.getElementById('twd-title').textContent = (n.name || iid) + ' · 拓扑下钻';
+  const gc = TW_GRADE_COLOR[n.grade] || TW_GRADE_COLOR.unknown;
+  const replayed = (_twinMode === 'replay');
+  let html = '';
+  // ① 状态与健康分
+  html += '<div class="fl-sec"><h4>① 状态与复合健康分</h4><div class="fl-item">' +
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">' +
+    '<span class="fl-badge" style="background:' + gc + '22;color:' + gc + ';font-size:13px;padding:3px 12px">' + (n.score === null || n.score === undefined ? '无数据' : n.score) + ' · ' + TW_GRADE_LABEL[n.grade] + '</span>' +
+    '<span class="fl-badge" style="background:var(--border);color:var(--text-muted)">' + escapeHtml(n.status) + '</span>' +
+    (replayed ? '<span class="fl-badge" style="background:#f59e0b22;color:#f59e0b">回放时刻</span>' : '') +
+    '</div>' +
+    '<div style="font-size:12px;color:var(--text-muted)">' + escapeHtml([n.host ? n.host + ':' + n.port : null, n.db_type, n.role, n.db_unique_name, n.instance_name].filter(Boolean).join(' · ') || '—') + '</div>' +
+    (n.err ? '<div style="font-size:12px;color:#ef4444;margin-top:4px">' + escapeHtml(String(n.err)) + '</div>' : '') +
+    (replayed ? '<div style="font-size:11.5px;color:var(--text-muted);margin-top:6px">回放视图：智能叠加（漂移/容量）仅在实时视图计算</div>' : (n.has_smart ? '' : '<div style="font-size:11.5px;color:var(--text-muted);margin-top:6px">⚠ 尚无基线——请到「智能基线」先学习，才有漂移/容量叠加</div>')) +
+    '</div></div>';
+  // ② 关键指标
+  const m = n.metrics || {};
+  const metric = (label, v) => '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:7px 10px"><div style="font-size:10.5px;color:var(--text-muted)">' + label + '</div><div style="font-size:14px;font-weight:700">' + twFm(v) + '</div></div>';
+  html += '<div class="fl-sec"><h4>② 关键指标</h4><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">' +
+    metric('QPS', m.qps) + metric('TPS', m.tps) + metric('连接数', m.conn_total) + metric('连接使用率%', m.conn_usage_pct) +
+    metric('缓存命中%', m.cache_hit_pct) + metric('锁等待', m.lock_waits) + metric('慢查询', m.slowq) + metric('复制延迟s', m.repl_lag_s) +
+    '</div></div>';
+  // ③ 智能叠加（仅实时）
+  if (!replayed) {
+    html += '<div class="fl-sec"><h4>③ 智能叠加（漂移 / 容量）</h4>';
+    if ((n.drifts || []).length) {
+      html += n.drifts.map(x => '<div class="fl-item" style="display:flex;justify-content:space-between;gap:8px"><b>' + escapeHtml(x.label) + '</b><span class="fl-badge" style="background:' + (x.severity === 'critical' ? '#ef444422;color:#ef4444' : '#f59e0b22;color:#f59e0b') + '">' + (x.severity === 'critical' ? '严重' : '警告') + ' z=' + x.z + ' · 当前 ' + x.value + '</span></div>').join('');
+    } else {
+      html += '<div class="fl-item" style="color:#22c55e">✔ 无漂移</div>';
+    }
+    (n.capacity_risks || []).forEach(f => {
+      const color = f.severity === 'critical' ? '#ef4444' : '#f59e0b';
+      html += '<div class="fl-item" style="display:flex;justify-content:space-between;gap:8px"><b>' + escapeHtml(f.label) + '</b><span class="fl-badge" style="background:' + color + '22;color:' + color + '">预计 ' + escapeHtml(f.eta) + ' 触及 ' + f.threshold + '</span></div>';
+    });
+    html += '</div>';
+  }
+  // ④ 联动处置
+  html += '<div class="fl-sec"><h4>④ 联动处置</h4><div style="display:flex;gap:8px;flex-wrap:wrap">' +
+    '<button class="btn btn-primary" style="padding:7px 14px" onclick="fleetTriggerAutonomy(\'' + iid + '\')">⚡ 触发自治闭环</button>' +
+    '<button class="btn btn-ghost" style="padding:7px 14px" onclick="showPage(\'fleet\');openFleetDrawer(\'' + iid + '\')">🔍 基线下钻</button>' +
+    (replayed ? '' : '<button class="btn btn-ghost" style="padding:7px 14px" onclick="fleetLearnOne(\'' + iid + '\', this)">🧠 学习基线</button>') +
+    '</div></div>';
+  document.getElementById('twd-body').innerHTML = html;
+  drawer.classList.add('open'); mask.classList.add('open');
+}
+
+function closeTwinDrawer() {
+  const drawer = document.getElementById('twin-drawer');
+  const mask = document.getElementById('twin-drawer-mask');
+  if (drawer) drawer.classList.remove('open');
+  if (mask) mask.classList.remove('open');
+}
+
+function openTwinLinksModal() {
+  const nodes = ((_twinData || {}).nodes) || [];
+  const opt = (sel) => nodes.map(n => '<option value="' + escapeHtml(n.iid) + '">' + escapeHtml((n.name || n.iid) + '（' + (n.db_type || '—') + '）') + '</option>').join('');
+  const src = document.getElementById('tw-link-src');
+  const dst = document.getElementById('tw-link-dst');
+  if (src && !src.options.length) src.innerHTML = opt();
+  if (dst && !dst.options.length) dst.innerHTML = opt();
+  twinRenderLinksList();
+  document.getElementById('tw-links-mask').classList.add('open');
+}
+
+function closeTwinLinksModal() {
+  document.getElementById('tw-links-mask').classList.remove('open');
+}
+
+function twinRenderLinksList() {
+  const box = document.getElementById('tw-links-list');
+  if (!box) return;
+  const links = (((_twinData || {}).edges) || []).filter(e => !e.auto);
+  if (!links.length) { box.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0">暂无手动连线——自动识别的 ADG/RAC 关系无需在此声明</div>'; return; }
+  box.innerHTML = links.map(e => {
+    const nameOf = (iid) => { const n = ((_twinData || {}).nodes || []).find(x => x.iid === iid); return n ? (n.name || iid) : iid; };
+    return '<div class="tw-link-row"><span><b>' + escapeHtml(nameOf(e.src)) + '</b> → <b>' + escapeHtml(nameOf(e.dst)) + '</b>' +
+      ' <span class="badge">' + escapeHtml(e.kind_label || TW_KIND_LABEL[e.kind] || e.kind) + '</span>' +
+      (e.label ? ' <span style="color:var(--text-muted)">' + escapeHtml(e.label) + '</span>' : '') +
+      (e.dangling ? ' <span class="badge" style="background:#ef444422;color:#ef4444">对端离线</span>' : '') + '</span>' +
+      '<button class="btn btn-ghost" style="padding:2px 10px;font-size:11.5px;color:#ef4444" onclick="twinDelLink(' + e.id + ')">删除</button></div>';
+  }).join('');
+}
+
+async function twinAddLink() {
+  const src = document.getElementById('tw-link-src').value;
+  const dst = document.getElementById('tw-link-dst').value;
+  const kind = document.getElementById('tw-link-kind').value;
+  const label = document.getElementById('tw-link-label').value.trim();
+  if (!src || !dst) { toastError('请先选择源与目标实例'); return; }
+  if (src === dst) { toastError('不能连到自身'); return; }
+  try {
+    const r = await fetch('/api/intelligence/twin/links', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ src: src, dst: dst, kind: kind, label: label })
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) { toastError(d.msg || '添加失败'); return; }
+    toastSuccess('连线已添加');
+    document.getElementById('tw-link-label').value = '';
+    await loadTwinTopology();
+    twinRenderLinksList();
+  } catch (e) { toastError('添加失败: ' + e.message); }
+}
+
+async function twinDelLink(id) {
+  try {
+    const r = await fetch('/api/intelligence/twin/links/' + id, { method: 'DELETE' });
+    const d = await r.json();
+    if (!r.ok || !d.ok) { toastError(d.msg || '删除失败'); return; }
+    toastSuccess('连线已删除');
+    await loadTwinTopology();
+    twinRenderLinksList();
+  } catch (e) { toastError('删除失败: ' + e.message); }
+}
+
 
 // ─── SQL 审核详情：右侧抽屉开关（P0/P1 ②） ─────────────────────────────
 function openSqlAuditDrawer() {
@@ -21330,22 +22164,16 @@ function onShowAiAssistantChange() {
 // 页面加载时同步「显示 AI 巡检助手」全局开关 + 面板初始状态
 function syncShowAiAssistant() {
   fetch('/api/config').then(function(r){ return r.json(); }).then(function(cfg){
-    const show = cfg.show_ai_assistant !== false; // 默认显示
+    const enabled = cfg.show_ai_assistant !== false; // 开关=false 表示彻底停用
     const t = document.getElementById('show-ai-assistant-toggle');
-    if (t) t.checked = show;
+    if (t) t.checked = enabled;
     const panel = document.getElementById('ai-chat-sidebar');
     const fab = document.getElementById('ai-chat-fab');
     const mainContent = document.querySelector('.main-content');
-    const isMobile = window.matchMedia('(max-width: 1100px)').matches;
-    if (show) {
-      if (panel) panel.classList.remove('collapsed');
-      if (fab) fab.style.display = isMobile ? 'flex' : 'none';
-      if (mainContent) mainContent.classList.remove('ai-panel-collapsed');
-    } else {
-      if (panel) panel.classList.add('collapsed');
-      if (fab) fab.style.display = 'none';
-      if (mainContent) mainContent.classList.add('ai-panel-collapsed');
-    }
+    // 默认隐藏（收起）：面板不占位，右下角浮动按钮可唤出
+    if (panel) panel.classList.add('collapsed');
+    if (fab) fab.style.display = enabled ? 'flex' : 'none';
+    if (mainContent) mainContent.classList.add('ai-panel-collapsed');
     scheduleResizeAllCharts();
   }).catch(function(){});
 }
@@ -22874,7 +23702,7 @@ async function deleteBackupHistory(recordId) {
 </script>
 
 <!-- AI Chat Panel (v2.6.2: 固定右侧) -->
-<aside class="ai-chat-panel" id="ai-chat-sidebar" data-page-node-id="iiI6nPIa7A7FFElRiiLTyH">
+<aside class="ai-chat-panel collapsed" id="ai-chat-sidebar" data-page-node-id="iiI6nPIa7A7FFElRiiLTyH">
   <div class="chat-header" style="position:relative" data-page-node-id="lU6QLDalDEZrh6sAr6e0Yc">
     <span style="font-size:20px" data-page-node-id="5b4aY6PZBcTXUCetxLS4Jc">🤖</span>
     <span class="chat-title" data-i18n="webui.chat_title" data-page-node-id="Z5jM1u5eKxj9k6dK8HGnTB">AI 巡检助手</span>

@@ -129,9 +129,12 @@ class AutonomyLoop:
         返回 {ok, run_id, state, proposals, diagnosis}。
         """
         from modules.inspection.findings import emit_findings
+        from modules.intelligence.fleet import emit_drift_findings
         from modules.intelligence.skills import WriteGate
 
+        # 双种子源：巡检发现 + 舰队智能漂移/容量事件（P1 Fleet Intelligence）
         findings = emit_findings(instance_id, severity_threshold)
+        findings.extend(emit_drift_findings(instance_id))
         if not findings:
             return {
                 "ok": False,

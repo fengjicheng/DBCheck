@@ -451,7 +451,7 @@ def run_workflow_ep(wf_id: int):
 
 @intelligence_bp.route("/api/intelligence/workflow-nodes", methods=["GET"])
 def workflow_nodes_ep():
-    """返回 Builder 可用的节点 ref 清单：专家能力 + 写类技能。"""
+    """返回 Builder 可用的节点 ref 清单：专家能力 + 写类技能 + 巡检组件。"""
     try:
         hub = get_hub()
         specialists = hub.capabilities()
@@ -472,7 +472,63 @@ def workflow_nodes_ep():
                 })
         except Exception:
             skills = []
-        return jsonify({"ok": True, "specialists": specialists, "skills": skills})
+        components: List[Dict[str, Any]] = []
+        try:
+            from .inspect_components import list_components
+
+            components = list_components()
+        except Exception:
+            components = []
+        return jsonify({"ok": True, "specialists": specialists,
+                        "skills": skills, "components": components})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+# ── P1：工作流市场（导出 / 导入 / 内置模板） ─────────────────────────────
+
+@intelligence_bp.route("/api/intelligence/workflows/<int:wf_id>/export",
+                       methods=["GET"])
+def export_workflow_ep(wf_id: int):
+    """导出工作流为市场载荷（前端触发下载 JSON 文件）。"""
+    try:
+        from .workflow_store import export_workflow as _export
+
+        payload = _export(wf_id)
+        if not payload:
+            return jsonify({"ok": False, "msg": "workflow not found"}), 404
+        return jsonify({"ok": True, "payload": payload})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+@intelligence_bp.route("/api/intelligence/workflows/import", methods=["POST"])
+def import_workflow_ep():
+    """导入市场载荷（单个 payload 或 {"templates": [...]} 批量）。"""
+    data = request.get_json(silent=True) or {}
+    payloads = data.get("templates") if isinstance(data.get("templates"), list) \
+        else [data.get("payload") or data]
+    from .workflow_store import import_workflow as _import
+
+    results = []
+    ok_n = 0
+    for p in payloads:
+        if not isinstance(p, dict):
+            results.append({"ok": False, "error": "载荷不是对象"})
+            continue
+        r = _import(p)
+        results.append(r)
+        ok_n += 1 if r.get("ok") else 0
+    return jsonify({"ok": ok_n > 0, "imported": ok_n, "results": results})
+
+
+@intelligence_bp.route("/api/intelligence/market/builtin", methods=["GET"])
+def market_builtin_ep():
+    """内置 runbook 模板清单（不落库，前端点「导入」才入库）。"""
+    try:
+        from .market_templates import builtin_templates
+
+        return jsonify({"ok": True, "templates": builtin_templates()})
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)}), 500
 
@@ -994,5 +1050,127 @@ def autonomy_config_set_ep():
     try:
         from .workflow_store import set_autonomy_config as _set
         return jsonify(_set(bool(data["kill_switch"])))
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+# ── P1 舰队智能（Fleet Intelligence）───────────────────────────────────
+
+@intelligence_bp.route("/api/intelligence/fleet/overview", methods=["GET"])
+def fleet_overview_ep():
+    """舰队总览：各实例 基线状态 + 漂移摘要 + 容量风险 排行。"""
+    try:
+        from .fleet import fleet_overview
+
+        return jsonify(fleet_overview())
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+@intelligence_bp.route("/api/intelligence/fleet/learn", methods=["POST"])
+def fleet_learn_ep():
+    """触发基线学习。入参 iid（可空=学习历史库中全部实例）、days（默认14）。"""
+    data = request.get_json(silent=True) or {}
+    days = int(data.get("days") or 14)
+    try:
+        from . import fleet
+
+        iid = (data.get("iid") or "").strip()
+        targets = [iid] if iid else [it["iid"] for it in fleet.list_instances()]
+        if not targets:
+            return jsonify({"ok": False, "msg": "监控历史库中暂无实例数据"}), 404
+        results = [fleet.learn_baseline(t, days=days) for t in targets]
+        ok_n = sum(1 for r in results if r.get("ok"))
+        return jsonify({"ok": ok_n > 0, "learned": ok_n, "total": len(results),
+                        "results": results})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+@intelligence_bp.route("/api/intelligence/fleet/baseline/<iid>", methods=["GET"])
+def fleet_baseline_ep(iid: str):
+    """读取目标实例某指标的基线曲线（按小时桶）。入参 metric（必填）。"""
+    from .fleet import METRICS as _METRICS, get_baseline
+
+    metric = (request.args.get("metric") or "").strip()
+    if metric not in _METRICS:
+        return jsonify({"ok": False, "msg": f"未知指标: {metric}"}), 400
+    try:
+        return jsonify({"ok": True, "iid": iid, "metric": metric,
+                        "baseline": get_baseline(iid, metric)})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+@intelligence_bp.route("/api/intelligence/fleet/drift/<iid>", methods=["GET"])
+def fleet_drift_ep(iid: str):
+    """对目标实例执行漂移检测（最近 30 分钟 vs 时段基线）。"""
+    try:
+        from .fleet import detect_drift
+
+        return jsonify(detect_drift(iid))
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+@intelligence_bp.route("/api/intelligence/fleet/forecast/<iid>", methods=["GET"])
+def fleet_forecast_ep(iid: str):
+    """目标实例容量预测（线性外推触及阈值日期）。入参 horizon（默认30天）。"""
+    try:
+        from .fleet import forecast_capacity
+
+        horizon = request.args.get("horizon", type=int) or 30
+        return jsonify(forecast_capacity(iid, horizon_days=horizon))
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+# ── P2 拓扑孪生（DB Twin）──────────────────────────────────────────────
+
+@intelligence_bp.route("/api/intelligence/twin/topology", methods=["GET"])
+def twin_topology_ep():
+    """拓扑孪生快照：节点（实时状态+指标+漂移/容量叠加+健康分）+ 边 + 汇总。"""
+    try:
+        from .twin import topology_snapshot
+
+        return jsonify(topology_snapshot())
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+@intelligence_bp.route("/api/intelligence/twin/replay", methods=["GET"])
+def twin_replay_ep():
+    """历史回放：按 hours_ago 重建各实例节点状态（漂移/容量不参与回放）。"""
+    try:
+        from .twin import replay
+
+        hours = request.args.get("hours_ago", type=float) or 1.0
+        return jsonify(replay(hours_ago=hours))
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+@intelligence_bp.route("/api/intelligence/twin/links", methods=["POST"])
+def twin_add_link_ep():
+    """新增手动依赖连线。入参 {src, dst, kind, label}。"""
+    data = request.get_json(silent=True) or {}
+    try:
+        from .twin import add_link
+
+        return jsonify(add_link(
+            data.get("src") or "", data.get("dst") or "",
+            kind=data.get("kind") or "custom", label=data.get("label") or "",
+        ))
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 500
+
+
+@intelligence_bp.route("/api/intelligence/twin/links/<int:link_id>", methods=["DELETE"])
+def twin_remove_link_ep(link_id: int):
+    """删除手动依赖连线。"""
+    try:
+        from .twin import remove_link
+
+        return jsonify(remove_link(link_id))
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)}), 500

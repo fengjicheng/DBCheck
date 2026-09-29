@@ -58,6 +58,8 @@ menus_data = [
     ('diag-history',      'menu.diag-history',     0, 59),
     ('sql-audit',         'menu.sql-audit',        0, 60),
     ('autonomy',         'menu.autonomy',          0, 61),
+    ('fleet',            'menu.fleet',             0, 62),
+    ('twin',             'menu.twin',              0, 625),
     ('data-management',  'menu.data-management', 0, 66),
     ('about',            'menu.about',           0, 67),
     ('disaster-recovery','menu.disaster-recovery',0, 65),
